@@ -1,0 +1,12 @@
+{
+  "name": "root-learner",
+  "version": "2.0.0",
+  "description": "离线单文件英语词根背诵工具：范围乱序翻面学习 + 基本 3 轮选择题测试（错题补考至多 8 轮）+ 艾宾浩斯间隔复习",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node tests/test.mjs"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

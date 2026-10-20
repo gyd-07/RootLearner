@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词根背诵 · Root Learner</title>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#fff; --ink:#1c2430; --muted:#6b7787;
+  --line:#e3e8ef; --brand:#2f6fed; --brand-soft:#eaf1ff;
+  --ok:#1f9d55; --ok-soft:#e7f6ed; --bad:#d64545; --bad-soft:#fdecec;
+  --warn:#b7791f; --warn-soft:#fdf3e2;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+#app{max-width:880px;margin:0 auto;padding:20px 16px 60px}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+h1{font-size:20px;margin:0;letter-spacing:.5px}
+h1 span{color:var(--brand)}
+nav.tabs{display:flex;gap:6px;flex-wrap:wrap}
+nav.tabs button{background:var(--card);border:1px solid var(--line);color:var(--muted);
+  padding:6px 13px;border-radius:999px;cursor:pointer;font-size:13.5px;font-family:inherit}
+nav.tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+.panel h2{font-size:15px;margin:0 0 12px;color:var(--muted);font-weight:600;letter-spacing:.3px}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:12.5px;color:var(--muted)}
+select,input[type=number]{background:#fff;border:1px solid var(--line);border-radius:9px;
+  padding:8px 10px;font-size:14px;font-family:inherit;color:var(--ink);min-width:110px}
+select:focus,input:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 12px;
+  cursor:pointer;font-size:13px;color:var(--muted);font-family:inherit}
+.chip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stat{background:#fafbfd;border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+.stat b{display:block;font-size:22px;line-height:1.25;font-weight:650}
+.stat i{font-style:normal;font-size:12.5px;color:var(--muted)}
+.stat.ok b{color:var(--ok)} .stat.bad b{color:var(--bad)} .stat.brand b{color:var(--brand)}
+.btn{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:11px 20px;
+  font-size:15px;cursor:pointer;font-family:inherit;font-weight:550}
+.btn:hover{filter:brightness(1.06)}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:500}
+.btn.soft{background:var(--brand-soft);color:var(--brand)}
+.btn.sm{padding:7px 14px;font-size:13.5px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.hint{font-size:13px;color:var(--muted)}
+.note{background:var(--brand-soft);border-radius:10px;padding:11px 14px;font-size:13.5px;color:#2a4a86}
+.flash{background:var(--warn-soft);border:1px solid #f0dcb4;color:#7a5312;
+  border-radius:10px;padding:10px 14px;font-size:13.5px;margin-bottom:12px}
+
+/* study card */
+.cardwrap{perspective:1400px;margin:6px 0 14px}
+.flipcard{position:relative;min-height:290px;cursor:pointer;transform-style:preserve-3d;
+  transition:transform .45s cubic-bezier(.4,.2,.2,1)}
+.flipcard.rev{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;backface-visibility:hidden;background:var(--card);
+  border:1px solid var(--line);border-radius:16px;padding:26px 24px;
+  display:flex;flex-direction:column;justify-content:center;gap:12px;box-shadow:0 2px 10px rgba(20,30,50,.05)}
+.face.back{transform:rotateY(180deg);justify-content:flex-start;overflow:auto}
+.tag{display:inline-block;background:var(--brand-soft);color:var(--brand);border-radius:999px;
+  padding:3px 11px;font-size:12.5px;font-weight:600;align-self:flex-start}
+.rootform{font-size:34px;font-weight:650;letter-spacing:.5px;line-height:1.3}
+.rootmean{font-size:19px;color:var(--muted)}
+.wlist{display:flex;flex-direction:column;gap:9px;margin-top:4px}
+.witem{border-bottom:1px dashed var(--line);padding-bottom:8px}
+.witem:last-child{border-bottom:0}
+.witem .w{font-size:19px;font-weight:600}
+.witem .p{color:var(--brand);font-size:13px;margin:0 6px}
+.witem .c{color:var(--ink);font-size:15.5px}
+.progress{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-bottom:10px}
+.progress i{display:block;height:100%;background:var(--brand);transition:width .3s}
+.pbar-txt{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+
+/* quiz */
+.qbox{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px}
+.qmeta{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);margin-bottom:14px;gap:10px;flex-wrap:wrap}
+.qtype{background:#f1f4f9;border-radius:999px;padding:3px 11px;font-size:12.5px}
+.qtext{font-size:21px;font-weight:600;margin-bottom:18px;line-height:1.5}
+.qtext em{font-style:normal;color:var(--brand);background:var(--brand-soft);padding:1px 7px;border-radius:6px}
+.opts{display:flex;flex-direction:column;gap:9px}
+.opt{text-align:left;background:#fff;border:1.5px solid var(--line);border-radius:11px;
+  padding:12px 15px;font-size:15.5px;cursor:pointer;font-family:inherit;color:var(--ink);
+  display:flex;gap:11px;align-items:baseline;transition:border-color .15s,background .15s}
+.opt:hover:not(:disabled){border-color:var(--brand);background:var(--brand-soft)}
+.opt kbd{background:#f1f4f9;border:1px solid var(--line);border-radius:5px;padding:0 6px;
+  font-size:12px;color:var(--muted);font-family:inherit;flex:0 0 auto}
+.opt.right{border-color:var(--ok);background:var(--ok-soft);font-weight:600}
+.opt.wrong{border-color:var(--bad);background:var(--bad-soft)}
+.opt:disabled{cursor:default}
+.explain{margin-top:16px;background:#fafbfd;border:1px solid var(--line);border-radius:11px;padding:13px 15px;font-size:14px}
+.explain .hd{font-weight:650;margin-bottom:5px}
+.explain .hd.ok{color:var(--ok)} .explain .hd.bad{color:var(--bad)}
+.explain .rr{color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12.5px;background:#fafbfd}
+.lvl{display:inline-flex;gap:3px}
+.lvl i{width:9px;height:9px;border-radius:2px;background:var(--line);display:block}
+.lvl i.f{background:var(--brand)}
+.lvl i.m{background:var(--ok)}
+.due-today{color:var(--bad);font-weight:600}
+.due-later{color:var(--muted)}
+ul.plain{margin:6px 0 0;padding-left:20px;font-size:13.5px;color:var(--muted)}
+ul.plain li{margin-bottom:4px}
+.summary{display:flex;flex-direction:column;gap:14px}
+.big{font-size:44px;font-weight:650;line-height:1.1}
+.wronglist{display:flex;flex-wrap:wrap;gap:7px}
+.wronglist span{background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:4px 10px;font-size:13px}
+.oklist span{background:var(--ok-soft);color:var(--ok);border-radius:8px;padding:4px 10px;font-size:13px}
+@media (max-width:600px){
+  .rootform{font-size:26px}.qtext{font-size:18px}.panel{padding:14px}
+  .face{padding:20px 16px}.flipcard{min-height:330px}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const DATA = /*__DATA__*/null;
+const INTERVALS = [1,2,4,7,15,30];   // 艾宾浩斯复习间隔（天）
+const MIN_ROUNDS = 3;                 // 每次测试的基本轮数（至少考 3 轮）
+const MAX_ROUNDS = 8;                 // 出现错题时逐轮追加补考，最多 8 轮
+const KEY = 'rootLearner.v1';
+
+const mem = {};
+let STORE_OK = true;
+const store = {
+  get(k){ try{ return localStorage.getItem(k); }catch(e){ STORE_OK=false; return mem[k]||null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){ STORE_OK=false; mem[k]=v; } }
+};
+
+let DB = load();
+let view = 'home';
+let S = null;
+let msg = '';
+
+function load(){
+  try{
+    const o = JSON.parse(store.get(KEY));
+    if(o && o.rec && o.set) return o;
+  }catch(e){}
+  return {rec:{}, set:{from:DATA.letters[0], to:DATA.letters[DATA.letters.length-1], daily:20}, orderKey:null, orderPool:[]};
+}
+function save(){ store.set(KEY, JSON.stringify(DB)); }
+function today(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+function addDays(ms,n){ const d=new Date(ms); d.setDate(d.getDate()+n); d.setHours(0,0,0,0); return d.getTime(); }
+function fmt(ms){ const d=new Date(ms); return (d.getMonth()+1)+'月'+d.getDate()+'日'; }
+function relDays(ms){
+  const n = Math.round((ms - today())/86400000);
+  if(n<=0) return '今天';
+  if(n===1) return '明天';
+  return n+'天后';
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+const byId = id => DATA.roots.find(r=>r.id===id);
+const label = r => r.forms.join(', ');
+const cnOf = w => w.senses.map(s=>s.cn).join('；');
+const wordLine = w => w.w + ' ' + w.senses.map(s=>s.pos+' '+s.cn).join('；');
+const mastered = rec => rec && rec.level >= INTERVALS.length;
+
+function lettersInRange(){
+  let i = DATA.letters.indexOf(DB.set.from), j = DATA.letters.indexOf(DB.set.to);
+  if(i<0) i=0;
+  if(j<0) j=DATA.letters.length-1;
+  return DATA.letters.slice(Math.min(i,j), Math.max(i,j)+1);
+}
+function scopeRoots(){
+  const L = new Set(lettersInRange());
+  return DATA.roots.filter(r=>L.has(r.letter));
+}
+function unlearned(){ return scopeRoots().filter(r=>!DB.rec[r.id]); }
+function dueList(){ const t=today(); return DATA.roots.filter(r=>DB.rec[r.id] && DB.rec[r.id].next<=t); }
+function wordCount(list){ return list.reduce((a,r)=>a+r.words.length,0); }
+
+/* ---------- 乱序：在选定范围内生成随机顺序 ---------- */
+function scopeKey(){ return DB.set.from+'~'+DB.set.to; }
+function ensureOrder(){
+  // 范围变化（或首次打开）时，在所选范围内重新生成一个完整随机顺序，并立即持久化
+  const key = scopeKey();
+  const sc = scopeRoots();
+  const ids = new Set(sc.map(r=>r.id));
+  const poolOk = Array.isArray(DB.orderPool) && DB.orderPool.length===sc.length && DB.orderPool.every(id=>ids.has(id));
+  if(DB.orderKey!==key || !poolOk){
+    DB.orderKey = key;
+    DB.orderPool = shuffle(sc.map(r=>r.id));
+    save();
+  }
+}
+function reshuffleOrder(){ DB.orderPool = shuffle(scopeRoots().map(r=>r.id)); save(); }
+function orderIds(onlyUnlearned){
+  ensureOrder();
+  if(!onlyUnlearned) return DB.orderPool.slice();
+  return DB.orderPool.filter(id=>!DB.rec[id]);
+}
+/* 按乱序顺序取今天的 N 个新词根 */
+function pickNew(n){
+  return orderIds(true).slice(0, Math.max(1,n|0)).map(id=>byId(id));
+}
+
+/* ---------- question generation ---------- */
+function uniqueOpts(correct, cands, k){
+  const norm = s => String(s).trim().toLowerCase();
+  const out = [correct]; const seen = new Set([norm(correct)]);
+  for(const c of shuffle(cands)){
+    if(out.length >= k+1) break;
+    const key = norm(c);
+    if(key && !seen.has(key)){ seen.add(key); out.push(c); }
+  }
+  return shuffle(out);
+}
+function otherRoots(r){
+  const same = DATA.roots.filter(x=>x.id!==r.id && x.letter===r.letter);
+  return same.length >= 6 ? same : DATA.roots.filter(x=>x.id!==r.id);
+}
+function flatWords(list){ const o=[]; list.forEach(r=>r.words.forEach(w=>o.push(w))); return o; }
+
+function makeQuestion(id){
+  const r = byId(id);
+  const others = otherRoots(r);
+  const types = [1,2,3,4,5,6];
+  const t = types[Math.floor(Math.random()*types.length)];
+  const w = r.words[Math.floor(Math.random()*r.words.length)];
+  const L = label(r);
+
+  if(t===1) return {type:'词根 → 词根释义', id,
+    text:'词根 <em>'+esc(L)+'</em> 的含义是？',
+    opts: uniqueOpts(r.meaningEn, others.map(x=>x.meaningEn), 3), ans:r.meaningEn, r, w};
+
+  if(t===2) return {type:'词根释义 → 词根', id,
+    text:'含义为 <em>'+esc(r.meaningEn)+'</em> 的词根是？',
+    opts: uniqueOpts(L, others.map(x=>label(x)), 3), ans:L, r, w};
+
+  if(t===3) return {type:'单词 → 中文释义', id,
+    text:'单词 <em>'+esc(w.w)+'</em> 的中文释义是？',
+    opts: uniqueOpts(cnOf(w), flatWords(others).map(x=>cnOf(x)), 3), ans:cnOf(w), r, w};
+
+  if(t===4) return {type:'中文释义 → 单词', id,
+    text:'中文释义 <em>'+esc(cnOf(w))+'</em> 对应哪个单词？',
+    opts: uniqueOpts(w.w, flatWords(others).map(x=>x.w), 3), ans:w.w, r, w};
+
+  if(t===5) return {type:'单词 → 词根', id,
+    text:'单词 <em>'+esc(w.w)+'</em> 属于哪个词根？',
+    opts: uniqueOpts(L, others.map(x=>label(x)), 3), ans:L, r, w};
+
+  return {type:'词根 → 单词', id,
+    text:'下列哪个单词含有词根 <em>'+esc(L)+'</em> ？',
+    opts: uniqueOpts(w.w, flatWords(others).map(x=>x.w), 3), ans:w.w, r, w};
+}
+
+/* ---------- session ---------- */
+function startSession(cards, mode){
+  if(!cards.length){ msg='当前没有可学习的词条。'; view='home'; render(); return; }
+  const t = today();
+  cards.forEach(id=>{
+    if(!DB.rec[id]) DB.rec[id] = {level:0, first:t, last:0, next:addDays(t,1), ok:0, no:0};
+  });
+  save();
+  S = {cards: shuffle(cards), mode, phase:'study', idx:0, revealed:false,
+       round:0, queue:[], qidx:0, q:null, answered:false, picked:-1,
+       wrong:{}, roundWrong:[], roundLog:[], totalOk:0, totalNo:0};
+  msg=''; view='session'; render();
+}
+/* 第 1~3 轮考全部卡片；第 4 轮起为追加补考，只考上一轮答错的卡片 */
+function roundQueue(round, prevWrong){
+  if(round <= MIN_ROUNDS) return S.cards.slice();
+  return prevWrong.slice();
+}
+function roundLabel(round){
+  return round<=MIN_ROUNDS ? '第 '+round+' 轮测试' : '第 '+round+' 轮（错题补考）';
+}
+/* 是否还能继续下一轮：未考满基本轮数(NaN 视作未满)，或已考满但本轮有错题且未达上限 */
+function roundNo(){ const n = parseInt(S.round,10); return isNaN(n) ? 1 : n; }
+function mustContinue(){ return roundNo() < MIN_ROUNDS; }                       // 基本轮数用满之前必须继续
+function canContinue(){ return mustContinue() || (S.roundWrong.length>0 && roundNo() < MAX_ROUNDS); }
+function beginRound(){
+  S.round++;
+  // 每一轮题目顺序都重新乱序
+  S.queue = shuffle(roundQueue(S.round, S.roundWrong));
+  S.qidx=0; S.roundWrong=[]; S.answered=false;
+  nextQuestion();
+}
+function nextQuestion(){
+  if(S.qidx >= S.queue.length){
+    S.roundLog.push({round:S.round, total:S.queue.length, wrong:S.roundWrong.length});
+    S.phase='roundend'; render(); return;
+  }
+  S.q = makeQuestion(S.queue[S.qidx]);
+  S.answered=false; S.picked=-1; S.phase='quiz'; render();
+}
+function answer(i){
+  if(S.answered) return;
+  S.answered=true; S.picked=i;
+  const id = S.q.id;
+  const ok = S.q.opts[i] === S.q.ans;
+  if(ok){ S.totalOk++; }
+  else{
+    S.totalNo++;
+    S.wrong[id] = (S.wrong[id]||0)+1;
+    if(!S.roundWrong.includes(id)) S.roundWrong.push(id);
+  }
+  render();
+}
+function afterAnswer(){
+  S.qidx++;
+  nextQuestion();
+}
+function commit(){
+  const t = today();
+  let up=0, down=0;
+  S.cards.forEach(id=>{
+    const rec = DB.rec[id] || {level:0, first:t, last:0, next:addDays(t,1), ok:0, no:0};
+    rec.last = t;
+    const w = S.wrong[id]||0;
+    if(w===0){
+      rec.ok++;
+      rec.level = Math.min(rec.level+1, INTERVALS.length);
+      rec.next = addDays(t, INTERVALS[rec.level-1]);
+      up++;
+    }else{
+      rec.no++;
+      rec.level = 0;
+      rec.next = addDays(t, 1);
+      down++;
+    }
+    DB.rec[id] = rec;
+  });
+  save();
+  S.up=up; S.down=down; S.phase='done'; render();
+}
+function nextBatch(){
+  const cards = pickNew(DB.set.daily).map(r=>r.id);
+  if(!cards.length){ msg='所选范围内已全部学完。'; view='home'; S=null; render(); return; }
+  startSession(cards,'new');
+}
+
+/* ---------- rendering ---------- */
+function el(html){ return html; }
+
+function navHtml(){
+  const tabs = [['home','首页'],['plan','复习计划'],['records','学习记录']];
+  return '<nav class="tabs">'+tabs.map(([v,t])=>
+    '<button data-nav="'+v+'" class="'+(view===v||(view==='session'&&v==='home')?'on':'')+'">'+t+'</button>').join('')+'</nav>';
+}
+
+function homeHtml(){
+  ensureOrder();
+  const sc = scopeRoots();
+  const un = unlearned();
+  const due = dueList();
+  const learned = sc.filter(r=>DB.rec[r.id]);
+  const mst = learned.filter(r=>mastered(DB.rec[r.id]));
+  const daily = Math.max(1, Math.min(999, DB.set.daily|0));
+  const newCards = pickNew(daily);
+  const take = newCards.length;
+  const batch = new Set(newCards.map(r=>r.id));
+  due.forEach(r=>batch.add(r.id));
+
+  const letterOpts = L => DATA.letters.map(x=>'<option value="'+x+'"'+(x===L?' selected':'')+'>'+x+'</option>').join('');
+  const presets = [10,20,30,50,80];
+  const preview = newCards.slice(0,6).map(r=>esc(label(r))).join('、');
+
+  return ''+
+  '<div class="panel">'+
+    '<h2>背诵范围与每日数量</h2>'+
+    '<div class="row">'+
+      '<div class="field"><label>起始字母</label><select id="from">'+letterOpts(DB.set.from)+'</select></div>'+
+      '<div class="field"><label>结束字母</label><select id="to">'+letterOpts(DB.set.to)+'</select></div>'+
+      '<div class="field"><label>每日背诵个数（词根卡片）</label>'+
+        '<input type="number" id="daily" min="1" max="999" value="'+daily+'"></div>'+
+    '</div>'+
+    '<div style="height:12px"></div>'+
+    '<div class="chips">'+presets.map(p=>'<button class="chip'+(p===daily?' on':'')+'" data-daily="'+p+'">'+p+' 个/天</button>').join('')+
+      '<span class="chip" style="cursor:default;border-style:dashed">范围含 '+sc.length+' 词根 · '+wordCount(sc)+' 单词</span></div>'+
+    '<div style="height:14px"></div>'+
+    '<div class="note"><b>乱序背诵</b>：'+DB.set.from+'–'+DB.set.to+' 范围内的 '+sc.length+' 个词根已生成一组随机顺序，学习与测试都按这个乱序进行；换字母范围会自动重新乱序，也可手动重排。'+
+      (preview ? '<div class="hint" style="margin-top:7px">本次前几个：'+preview+(newCards.length>6?' …':'')+'</div>' : '')+
+    '</div>'+
+    '<div style="height:12px"></div>'+
+    '<div class="btnrow">'+
+      '<button class="btn ghost sm" data-act="reshuffle">重新乱序</button>'+
+      '<button class="btn ghost sm" data-act="reset-scope">重置当前范围进度（'+sc.length+' 词根）</button>'+
+    '</div>'+
+  '</div>'+
+
+  '<div class="panel">'+
+    '<h2>学习状况</h2>'+
+    '<div class="stats">'+
+      '<div class="stat brand"><b>'+sc.length+'</b><i>范围内词根</i></div>'+
+      '<div class="stat"><b>'+learned.length+'</b><i>已学</i></div>'+
+      '<div class="stat ok"><b>'+mst.length+'</b><i>已掌握</i></div>'+
+      '<div class="stat bad"><b>'+due.length+'</b><i>今日待复习</i></div>'+
+      '<div class="stat"><b>'+un.length+'</b><i>范围内未学</i></div>'+
+    '</div>'+
+    '<div style="height:16px"></div>'+
+    '<div class="btnrow">'+
+      '<button class="btn" data-act="start-today"'+(batch.size?'':' disabled')+'>开始今日学习（'+batch.size+' 张卡片）</button>'+
+      '<button class="btn ghost" data-act="start-review"'+(due.length?'':' disabled')+'>只复习到期（'+due.length+'）</button>'+
+      '<button class="btn ghost" data-act="start-new"'+(take?'':' disabled')+'>只学新词根（'+take+'）</button>'+
+    '</div>'+
+    '<div style="height:10px"></div>'+
+    '<div class="hint">今日学习 = 范围内乱序抽取的 '+take+' 个新词根 + 到期复习 '+due.length+' 个（去重后共 '+batch.size+' 张卡片）</div>'+
+  '</div>'+
+
+  '<div class="panel">'+
+    '<h2>流程说明</h2>'+
+    '<ul class="plain">'+
+      '<li><b>学习阶段</b>：本次全部卡片按乱序依次翻面学习（正面＝词根＋英文释义，背面＝单词＋词性＋中文释义）。</li>'+
+      '<li><b>测试阶段</b>：学完后自动进入第一轮测试，<b>第 1～3 轮都考全部卡片</b>（每轮题目与顺序重新乱序）；'+
+        '若第 3 轮仍有错题，则自动追加补考轮（只考上一轮错题），每有错题就再加一轮，最多 '+MAX_ROUNDS+' 轮。</li>'+
+      '<li><b>题型</b>：词根↔词根释义、单词↔中文释义、单词↔所属词根，共 6 种，四选一。</li>'+
+      '<li><b>复习安排</b>：全部答对的卡片按艾宾浩斯间隔 1/2/4/7/15/30 天推后复习；本轮答错过则等级归零、明天重来。</li>'+
+      '<li><b>进度重置</b>：可只重置当前字母范围的进度（重新乱序并重学），也可在「学习记录」页清空全部进度。</li>'+
+      '<li>数据保存在本浏览器（localStorage），换浏览器或清理数据会丢失进度。</li>'+
+    '</ul>'+
+  '</div>';
+}
+
+function sessionHtml(){
+  if(S.phase==='study') return studyHtml();
+  if(S.phase==='quiz') return quizHtml();
+  if(S.phase==='roundend') return roundEndHtml();
+  return doneHtml();
+}
+
+function studyHtml(){
+  const r = byId(S.cards[S.idx]);
+  const rec = DB.rec[r.id];
+  const lvl = rec ? rec.level : 0;
+  const total = S.cards.length;
+  const pct = ((S.idx + (S.revealed?1:0)) / total * 100).toFixed(1);
+  const isLast = S.idx === total-1;
+
+  const front = '<div class="face">'+
+      '<span class="tag">'+r.letter+' 段 · 第 '+r.num+' 组'+(lvl?' · 等级 '+lvl:'')+'</span>'+
+      '<div class="rootform">'+esc(label(r))+'</div>'+
+      '<div class="rootmean">'+esc(r.meaningEn)+'</div>'+
+      '<div class="hint" style="margin-top:10px">点击卡片或按空格查看单词与中文释义</div>'+
+    '</div>';
+  const back = '<div class="face back">'+
+      '<span class="tag">'+r.letter+' 段 · 第 '+r.num+' 组</span>'+
+      '<div><span style="font-size:21px;font-weight:650">'+esc(label(r))+'</span>'+
+      '<span style="color:var(--muted);font-size:16px">　'+esc(r.meaningEn)+'</span></div>'+
+      '<div class="wlist">'+r.words.map(w=>
+        '<div class="witem"><span class="w">'+esc(w.w)+'</span>'+
+        w.senses.map(s=>'<span class="p">'+esc(s.pos)+'</span><span class="c">'+esc(s.cn)+'</span>').join('')+
+        '</div>').join('')+'</div>'+
+    '</div>';
+
+  return '<div class="panel" style="padding:16px">'+
+    '<div class="pbar-txt"><span>学习阶段 · 翻面记忆</span><span>'+(S.idx+1)+' / '+total+'</span></div>'+
+    '<div class="progress"><i style="width:'+pct+'%"></i></div>'+
+    '<div class="cardwrap"><div class="flipcard'+(S.revealed?' rev':'')+'" data-act="flip">'+front+back+'</div></div>'+
+    '<div class="btnrow">'+
+      '<button class="btn ghost sm" data-act="prev"'+(S.idx?'':' disabled')+'>上一个</button>'+
+      '<button class="btn soft sm" data-act="flip">'+(S.revealed?'正面':'翻面看释义')+'</button>'+
+      (isLast
+        ? '<button class="btn" data-act="begin-test"'+(S.revealed?'':'')+'>学完了，开始第一轮测试</button>'
+        : '<button class="btn sm" data-act="next">下一个</button>')+
+      '<button class="btn ghost sm" data-act="quit">退出</button>'+
+    '</div>'+
+  '</div>';
+}
+
+function quizHtml(){
+  const q = S.q;
+  const total = S.queue.length;
+  return '<div class="panel" style="padding:16px">'+
+    '<div class="pbar-txt"><span>'+roundLabel(S.round)+'</span><span>'+(S.qidx+1)+' / '+total+'</span></div>'+
+    '<div class="progress"><i style="width:'+((S.qidx)/total*100).toFixed(1)+'%"></i></div>'+
+    '<div class="qbox">'+
+      '<div class="qmeta"><span class="qtype">'+q.type+'</span><span>本轮已错 '+S.roundWrong.length+' 题</span></div>'+
+      '<div class="qtext">'+q.text+'</div>'+
+      '<div class="opts">'+q.opts.map((o,i)=>{
+        let cls='opt';
+        if(S.answered){
+          if(o===q.ans) cls+=' right';
+          else if(i===S.picked) cls+=' wrong';
+        }
+        return '<button class="'+cls+'" data-ans="'+i+'"'+(S.answered?' disabled':'')+'><kbd>'+(i+1)+'</kbd><span>'+esc(o)+'</span></button>';
+      }).join('')+'</div>'+
+      (S.answered ? explainHtml(q, S.q.opts[S.picked]===q.ans) : '')+
+      (S.answered ? '<div class="btnrow" style="margin-top:14px">'+
+        '<button class="btn sm" data-act="after">'+(S.qidx+1>=total?'本轮结束':'下一题')+'</button></div>' : '')+
+    '</div>'+
+  '</div>';
+}
+
+function explainHtml(q, ok){
+  const r = q.r;
+  return '<div class="explain">'+
+    '<div class="hd '+(ok?'ok':'bad')+'">'+(ok?'答对了':'答错了 · 正确答案：'+esc(q.ans))+'</div>'+
+    '<div><b>'+esc(label(r))+'</b> <span class="rr">'+esc(r.meaningEn)+'</span></div>'+
+    '<div class="rr" style="margin-top:5px">'+r.words.map(w=>esc(wordLine(w))).join('　|　')+'</div>'+
+  '</div>';
+}
+
+function roundEndHtml(){
+  const log = S.roundLog[S.roundLog.length-1] || {round:S.round,total:S.queue.length,wrong:S.roundWrong.length};
+  const okN = log.total - log.wrong;
+  const nWrong = S.roundWrong.length;
+  const another = canContinue();
+  const must = mustContinue();
+  const nextN = another ? (S.round+1<=MIN_ROUNDS ? S.cards.length : nWrong) : 0;
+  const passed = !must;
+  return '<div class="panel">'+
+    '<h2>'+roundLabel(log.round)+'结果</h2>'+
+    '<div class="summary">'+
+      '<div><span class="big">'+okN+' / '+log.total+'</span> <span class="hint">正确</span></div>'+
+      (nWrong
+        ? '<div><div class="hint" style="margin-bottom:6px">本轮答错（'+nWrong+'）</div><div class="wronglist">'+
+          S.roundWrong.map(id=>'<span>'+esc(label(byId(id)))+'</span>').join('')+'</div></div>'
+        : '<div class="note">本轮全部答对。</div>')+
+      '<div class="note">'+
+        (must
+          ? '基本轮数共 '+MIN_ROUNDS+' 轮，当前是第 '+log.round+' 轮，继续考第 '+(log.round+1)+' 轮（全部卡片重考）。'
+          : (another
+              ? '已考满基本轮数（'+MIN_ROUNDS+' 轮），但本轮仍有 '+nWrong+' 个错题，自动追加第 '+(log.round+1)+' 轮补考。'
+              : (nWrong ? '已达到最大轮数（'+MAX_ROUNDS+' 轮），剩余错题将在明天重新复习。' : '基本轮数与错题补考已全部通过。')))+
+      '</div>'+
+      '<div class="btnrow">'+
+        (another ? '<button class="btn" data-act="next-round">开始第 '+(log.round+1)+' 轮'+(log.round+1>MIN_ROUNDS?'补考（'+nextN+' 题）':'（'+nextN+' 题）')+'</button>' : '')+
+        '<button class="btn ghost" data-act="finish">结束并保存进度</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function doneHtml(){
+  const tot = S.totalOk + S.totalNo;
+  const acc = tot ? Math.round(S.totalOk/tot*100) : 0;
+  const nxt = S.cards.map(id=>DB.rec[id]).filter(Boolean).sort((a,b)=>a.next-b.next)[0];
+  return '<div class="panel">'+
+    '<h2>本次完成</h2>'+
+    '<div class="summary">'+
+      '<div><span class="big">'+acc+'%</span> <span class="hint">总正确率（'+S.totalOk+'/'+tot+' 题，共 '+S.round+' 轮测试）</span></div>'+
+      '<div class="stats">'+
+        '<div class="stat"><b>'+S.cards.length+'</b><i>卡片数</i></div>'+
+        '<div class="stat ok"><b>'+S.up+'</b><i>掌握度提升</i></div>'+
+        '<div class="stat bad"><b>'+S.down+'</b><i>需重新复习</i></div>'+
+        '<div class="stat brand"><b>'+(nxt?relDays(nxt.next):'—')+'</b><i>最近一次复习</i></div>'+
+      '</div>'+
+      '<div class="note">本次共完成 '+S.round+' 轮测试（基本 '+MIN_ROUNDS+' 轮'+(S.round>MIN_ROUNDS?'，含 '+ (S.round-MIN_ROUNDS) +' 轮错题补考':'')+'）。全部答对的卡片已按艾宾浩斯间隔（1/2/4/7/15/30 天）排入复习计划；答错过的卡片明天需要重新复习。</div>'+
+      '<div class="btnrow">'+
+        '<button class="btn" data-act="again">再学一批新词根</button>'+
+        '<button class="btn ghost" data-nav="plan">查看复习计划</button>'+
+        '<button class="btn ghost" data-nav="home">返回首页</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function planHtml(){
+  const t = today();
+  const days = [];
+  for(let i=0;i<7;i++){
+    const d = addDays(t,i);
+    const list = DATA.roots.filter(r=>{
+      const rec = DB.rec[r.id];
+      return rec && rec.next===d;
+    });
+    days.push({d, list});
+  }
+  const overdue = DATA.roots.filter(r=>{const rec=DB.rec[r.id]; return rec && rec.next<t;});
+  const un = unlearned();
+  const all = DATA.roots.filter(r=>DB.rec[r.id]);
+  return '<div class="panel">'+
+    '<h2>未来 7 天复习量</h2>'+
+    (all.length ? '<table><thead><tr><th>日期</th><th>待复习</th><th>词根</th></tr></thead><tbody>'+
+      days.map((o,i)=>'<tr><td>'+(i===0?'<span class="due-today">今天</span>':fmt(o.d))+'</td><td><b>'+o.list.length+'</b></td><td class="hint">'+
+        (o.list.slice(0,8).map(r=>esc(label(r))).join('、')||'—')+(o.list.length>8?' 等 '+o.list.length+' 个':'')+'</td></tr>').join('')+
+      '</tbody></table>' : '<div class="note">还没有学习记录。先回首页开始今日学习。</div>')+
+    (overdue.length ? '<div class="flash" style="margin-top:12px">另有 '+overdue.length+' 个卡片已过期未复习（今天之前到期）。</div>' : '')+
+  '</div>'+
+  '<div class="panel">'+
+    '<h2>间隔说明</h2>'+
+    '<ul class="plain">'+
+      '<li>掌握等级 1→6 对应复习间隔：'+INTERVALS.join(' / ')+' 天。</li>'+
+      '<li>一次测试中全部答对 → 等级 +1，按新间隔排期；答错过 → 等级归零，明天重新复习。</li>'+
+      '<li>等级 6 视为已掌握（30 天后仍会最后复查一次）。</li>'+
+    '</ul>'+
+    '<div style="height:10px"></div>'+
+    '<div class="stats">'+
+      '<div class="stat"><b>'+un.length+'</b><i>范围内未学</i></div>'+
+      '<div class="stat brand"><b>'+all.length+'</b><i>已学总数</i></div>'+
+      '<div class="stat ok"><b>'+all.filter(r=>mastered(DB.rec[r.id])).length+'</b><i>已掌握</i></div>'+
+    '</div>'+
+  '</div>';
+}
+
+function recordsHtml(){
+  const sc = scopeRoots();
+  const rows = sc.filter(r=>DB.rec[r.id]);
+  const dots = lv => '<span class="lvl">'+Array.from({length:INTERVALS.length},(_,i)=>
+      '<i class="'+(i<lv?(lv>=INTERVALS.length?'m':'f'):'')+'"></i>').join('')+'</span>';
+  return '<div class="panel">'+
+    '<h2>学习记录（'+DB.set.from+'–'+DB.set.to+' 段，共 '+rows.length+' 条）</h2>'+
+    (rows.length ? '<table><thead><tr><th>词根</th><th>释义</th><th>单词数</th><th>掌握度</th><th>下次复习</th><th>对/错</th></tr></thead><tbody>'+
+      rows.map(r=>{
+        const rec=DB.rec[r.id];
+        const late = rec.next<=today();
+        return '<tr><td><b>'+esc(label(r))+'</b><div class="hint">'+r.letter+r.num+'</div></td>'+
+        '<td>'+esc(r.meaningEn)+'</td><td>'+r.words.length+'</td>'+
+        '<td>'+dots(rec.level)+'</td>'+
+        '<td class="'+(late?'due-today':'due-later')+'">'+(late?'待复习':fmt(rec.next))+'<div class="hint">'+relDays(rec.next)+'</div></td>'+
+        '<td>'+rec.ok+' / '+rec.no+'</td></tr>';
+      }).join('')+'</tbody></table>'
+      : '<div class="note">该范围内还没有学习记录。</div>')+
+    '<div style="height:14px"></div>'+
+    '<div class="panel" style="background:#fafbfd;margin-bottom:0">'+
+      '<h2>进度重置</h2>'+
+      '<div class="hint" style="margin-bottom:10px">重置会清除所选范围内的掌握等级、对错统计与复习计划，并重新生成乱序顺序；卡片会回到「未学」状态。</div>'+
+      '<div class="btnrow">'+
+        '<button class="btn soft sm" data-act="reset-scope">重置当前范围（'+DB.set.from+'–'+DB.set.to+'，'+sc.length+' 词根）</button>'+
+        '<button class="btn ghost sm" data-act="reset-all">清空全部学习进度（'+DATA.roots.length+' 词根）</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function render(){
+  let body='';
+  if(view==='home') body = homeHtml();
+  else if(view==='session') body = sessionHtml();
+  else if(view==='plan') body = planHtml();
+  else if(view==='records') body = recordsHtml();
+
+  document.getElementById('app').innerHTML =
+    '<header class="top"><h1>词根<span>背诵</span> <span style="font-size:12px;color:var(--muted);font-weight:400">A–R · '+DATA.roots.length+' 词根 · '+wordCount(DATA.roots)+' 单词 · 乱序 · 基本 '+MIN_ROUNDS+' 轮</span></h1>'+navHtml()+'</header>'+
+    (STORE_OK ? '' : '<div class="flash">浏览器禁用了本地存储，学习记录仅保存在本次打开期间，关闭后会丢失。</div>')+
+    (msg ? '<div class="flash">'+esc(msg)+'</div>' : '')+
+    body;
+  if(view!=='home') msg='';
+  bindInputs();
+}
+
+function bindInputs(){
+  const f=document.getElementById('from'), t=document.getElementById('to'), d=document.getElementById('daily');
+  if(f) f.onchange = e=>{ DB.set.from=e.target.value; ensureOrder(); save(); render(); };
+  if(t) t.onchange = e=>{ DB.set.to=e.target.value; ensureOrder(); save(); render(); };
+  if(d) d.onchange = e=>{ DB.set.daily=Math.max(1,Math.min(999,parseInt(e.target.value,10)||1)); save(); render(); };
+}
+
+/* 重置指定字母范围内的学习进度 */
+function resetRange(){
+  const ids = new Set(scopeRoots().map(r=>r.id));
+  let n = 0;
+  Object.keys(DB.rec).forEach(k=>{ if(ids.has(Number(k))){ delete DB.rec[k]; n++; } });
+  DB.orderKey = null; DB.orderPool = [];
+  ensureOrder(); save();
+  return n;
+}
+function resetAll(){
+  DB.rec = {}; DB.orderKey = null; DB.orderPool = [];
+  ensureOrder(); save();
+}
+
+/* ---------- events ---------- */
+document.getElementById('app').addEventListener('click', e=>{
+  const nav = e.target.closest('[data-nav]');
+  if(nav){
+    if(S && S.phase!=='done' && !window.confirm('离开将中断本次学习，测试进度不会保存。确定离开？')) return;
+    view = nav.dataset.nav; S=null; render(); return;
+  }
+
+  const ans = e.target.closest('[data-ans]');
+  if(ans && S && !S.answered){ answer(parseInt(ans.dataset.ans,10)); return; }
+
+  const chipD = e.target.closest('[data-daily]');
+  if(chipD){ DB.set.daily = parseInt(chipD.dataset.daily,10); save(); render(); return; }
+
+  const act = e.target.closest('[data-act]');
+  if(!act) return;
+  const a = act.dataset.act;
+
+  if(a==='flip'){ if(S&&S.phase==='study'){ S.revealed=!S.revealed; render(); } }
+  else if(a==='next'){ if(S.idx<S.cards.length-1){ S.idx++; S.revealed=false; render(); } }
+  else if(a==='prev'){ if(S.idx>0){ S.idx--; S.revealed=false; render(); } }
+  else if(a==='begin-test'){ beginRound(); }
+  else if(a==='after'){ afterAnswer(); }
+  else if(a==='next-round'){ beginRound(); }
+  else if(a==='finish'){ commit(); }
+  else if(a==='quit'){ if(window.confirm('退出本次学习？已完成的测试进度不会保存。')){ S=null; view='home'; render(); } }
+  else if(a==='again'){ nextBatch(); }
+  else if(a==='reshuffle'){
+    reshuffleOrder(); msg='已按当前范围（'+DB.set.from+'–'+DB.set.to+'）重新乱序。'; render();
+  }
+  else if(a==='reset-scope'){
+    if(window.confirm('确定重置 '+DB.set.from+'–'+DB.set.to+' 范围的进度？该范围内所有卡片将回到「未学」状态。')){
+      const n = resetRange(); msg='已重置 '+DB.set.from+'–'+DB.set.to+' 范围进度（清除 '+n+' 条记录），并重新乱序。'; view='home'; S=null; render();
+    }
+  }
+  else if(a==='reset-all'){
+    if(window.confirm('确定清空全部学习进度与复习计划？此操作不可恢复。')){
+      resetAll(); msg='已清空全部学习进度，并重新乱序。'; view='home'; S=null; render();
+    }
+  }
+  else if(a==='start-today'){
+    const ids = pickNew(DB.set.daily).map(r=>r.id);
+    const set = new Set(ids);
+    dueList().forEach(r=>{ if(!set.has(r.id)){ set.add(r.id); ids.push(r.id); } });
+    startSession(ids,'mixed');
+  }
+  else if(a==='start-review'){ startSession(dueList().map(r=>r.id),'review'); }
+  else if(a==='start-new'){ startSession(pickNew(DB.set.daily).map(r=>r.id),'new'); }
+});
+
+document.addEventListener('keydown', e=>{
+  if(view!=='session' || !S) return;
+  if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
+  if(S.phase==='study'){
+    if(e.code==='Space'){ e.preventDefault(); S.revealed=!S.revealed; render(); }
+    else if(e.key==='ArrowRight'){ if(S.idx<S.cards.length-1){S.idx++;S.revealed=false;render();} }
+    else if(e.key==='ArrowLeft'){ if(S.idx>0){S.idx--;S.revealed=false;render();} }
+    else if(e.key==='Enter' && S.revealed && S.idx===S.cards.length-1){ e.preventDefault(); beginRound(); }
+  }else if(S.phase==='quiz'){
+    if(!S.answered && /^[1-4]$/.test(e.key)){ answer(parseInt(e.key,10)-1); }
+    else if(S.answered && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); afterAnswer(); }
+  }else if(S.phase==='roundend'){
+    if(e.key==='Enter'){ e.preventDefault(); if(canContinue()) beginRound(); else commit(); }
+  }
+});
+
+render();
+</script>
+</body>
+</html>

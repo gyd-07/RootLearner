@@ -47,7 +47,7 @@ function parseEls(h) {
 }
 
 /* ---------- 装载应用 ---------- */
-function loadApp(seedStore) {
+function loadApp(seedStore, opts = {}) {
   const memStore = seedStore || {};
   const appEl = makeEl();
   appEl.innerHTML = '';
@@ -62,11 +62,17 @@ function loadApp(seedStore) {
   const sandbox = {
     console,
     JSON, Math, Date, Object, Array, String, Number, Boolean, Set, Map, parseInt, parseFloat, isNaN,
-    localStorage: {
-      getItem: k => (k in memStore ? memStore[k] : null),
-      setItem: (k, v) => { memStore[k] = String(v); },
-      removeItem: k => { delete memStore[k]; }
-    },
+    localStorage: opts.throwStore
+      ? {
+          getItem(){ throw new Error('storage disabled'); },
+          setItem(){ throw new Error('storage disabled'); },
+          removeItem(){ throw new Error('storage disabled'); }
+        }
+      : {
+          getItem: k => (k in memStore ? memStore[k] : null),
+          setItem: (k, v) => { memStore[k] = String(v); },
+          removeItem: k => { delete memStore[k]; }
+        },
     window: { confirm: () => true },
     document: fakeDoc
   };
@@ -323,6 +329,33 @@ console.log('\n[5] 复习计划');
   ok(S(b).revealed === true, '空格键可翻面');
   b.key('ArrowRight');
   ok(S(b).idx === 1 && S(b).revealed === false, '方向键可切换卡片并复位翻面');
+}
+
+/* ================= 6. 边界与异常 ================= */
+console.log('\n[6] 边界与异常');
+{
+  // localStorage 内容损坏 → 回退默认空进度，页面正常渲染
+  const a = loadApp({ 'rootLearner.v1': '{broken json' });
+  ok(Object.keys(DB(a).rec).length === 0, 'localStorage 内容损坏时回退默认空进度', JSON.stringify(DB(a).rec));
+  ok(a.appEl.innerHTML.includes('背诵范围与每日数量'), '存储损坏时首页仍正常渲染');
+
+  // localStorage 抛异常（被浏览器禁用）→ 降级内存并提示
+  const b = loadApp({}, { throwStore: true });
+  ok(b.appEl.innerHTML.includes('浏览器禁用了本地存储'), 'localStorage 被禁用时显示降级提示');
+  b.click({ act: 'start-new' });
+  ok(S(b).phase === 'study', '内存降级下学习流程仍可用');
+
+  // 范围倒置：起始字母 > 结束字母 → 按字母序自动纠正
+  const c = loadApp({});
+  DB(c).set.from = 'C'; DB(c).set.to = 'A';
+  ok(c.T.scopeRoots().length === 81, '起始>结束仍按字母序取范围（A–C 共 81 词根）', c.T.scopeRoots().length);
+
+  // 每日数量越界 → 钳制到 1..999
+  const d = loadApp({});
+  DB(d).set.daily = 0; d.click({ nav: 'home' });
+  ok(d.appEl.innerHTML.includes('value="1"'), '每日数量 0 被钳制为 1');
+  DB(d).set.daily = 5000; d.click({ nav: 'home' });
+  ok(d.appEl.innerHTML.includes('value="999"'), '每日数量 5000 被钳制为 999');
 }
 
 console.log('\n===== 结果：' + pass + ' passed, ' + fail + ' failed =====');

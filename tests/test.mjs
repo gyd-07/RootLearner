@@ -83,7 +83,8 @@ function loadApp(seedStore, opts = {}) {
   vm.runInContext(`globalThis.__T = {
     get DB(){ return DB; },
     get S(){ return S; },
-    scopeRoots, orderIds, pickNew, ensureOrder, resetRange, resetAll, unlearned, canContinue, mustContinue
+    scopeRoots, orderIds, pickNew, ensureOrder, resetRange, resetAll, unlearned, canContinue, mustContinue,
+    startSession, newRoundCount, save
   };`, ctx);
   const T = sandbox.__T;
 
@@ -127,12 +128,13 @@ function driveRounds(a, mode = {}) {
       continue;
     }
     const st = S(a);
-    sizes.push({ round: st.round, n: st.queue.length, type: st.round <= 3 ? 'all' : 'makeup' });
+    sizes.push({ round: st.round, n: st.queue.length, type: st.round <= st.baseRounds ? 'all' : 'makeup' });
     const nWrong = allWrong ? st.queue.length : (wrong.includes(st.round) ? Math.min(2, st.queue.length) : 0);
     if (process.env.DBG) console.log('    >> round=' + st.round + ' qlen=' + st.queue.length + ' 答错' + nWrong);
     let i = 0;
     while (S(a).phase === 'quiz') {   // 答完本轮整队
       const q = S(a).q, ci = q.opts.indexOf(q.ans);
+      if(mode.seen) (mode.seen[q.id] || (mode.seen[q.id] = [])).push(q.key);
       const pick = i < nWrong ? (ci === 0 ? 1 : 0) : ci;
       a.click({ ans: pick }); i++;
       a.click({ act: 'after' });
@@ -235,6 +237,53 @@ console.log('\n[2] 测试轮数：基本 3 轮 + 错题追加补考（上限 8�
   ok(order1.slice().sort((x, y) => x - y).join(',') === order2.slice().sort((x, y) => x - y).join(','),
     '第 2 轮与第 1 轮覆盖同一批卡片');
   ok(order1.join(',') !== order2.join(','), '每轮题目顺序都重新乱序');
+
+  const g = loadApp({});
+  DB(g).set.newRounds = 1;
+  studyAll(g);
+  const s6 = driveRounds(g, {});
+  ok(s6.length === 1 && S(g).baseRounds === 1, '新学轮数设为 1 时全对只考 1 轮', JSON.stringify(s6));
+
+  const h = loadApp({});
+  DB(h).set.newRounds = 5;
+  studyAll(h);
+  const s7 = driveRounds(h, { wrong: [5] });
+  ok(s7.length === 6 && s7.slice(0, 5).every(s => s.type === 'all') && s7[5].n === 2,
+    '新学轮数设为 5 时先考 5 轮全部卡片再补考错题', JSON.stringify(s7.map(s => s.round + ':' + s.n)));
+
+  const i = loadApp({});
+  DB(i).set.newRounds = 1;
+  i.T.startSession([i.T.scopeRoots()[0].id], 'review');
+  while(S(i).phase === 'study'){
+    if(S(i).idx === S(i).cards.length - 1) i.click({ act: 'begin-test' });
+    else i.click({ act: 'next' });
+  }
+  const sr = driveRounds(i, {});
+  ok(sr.length === 3 && S(i).baseRounds === 3, '新学轮数设置不影响固定 3 轮的复习', JSON.stringify(sr));
+
+  const saved = {};
+  const j = loadApp(saved);
+  DB(j).set.newRounds = 5;
+  j.T.save();
+  const j2 = loadApp(saved);
+  ok(DB(j2).set.newRounds === 5 && j2.appEl.innerHTML.includes('<option value="5" selected>5 轮</option>'),
+    '新学轮数设置持久化并在首页保持选中');
+
+  const k = loadApp({});
+  ok(k.T.newRoundCount(0) === 1 && k.T.newRoundCount(99) === 8 && k.T.newRoundCount('bad') === 3,
+    '新学轮数越界钳制到 1/8，非法值回退默认 3');
+
+  const u = loadApp({});
+  DB(u).set.newRounds = 8;
+  const oneWordRoot = u.T.scopeRoots().find(r => r.words.length === 1);
+  u.T.startSession([oneWordRoot.id], 'new');
+  u.click({ act: 'begin-test' });
+  const seen = {};
+  const s8 = driveRounds(u, { wrong: 'all', seen });
+  const keys = seen[oneWordRoot.id];
+  ok(s8.length === 8 && keys.length === 8 && new Set(keys).size === 8,
+    '只有一个例词的词根连续 8 轮也不重复题目', JSON.stringify(keys));
+  ok(new Set(keys.map(key => key.split(':')[0])).size === 8, '8 种题型均参与跨轮次去重');
 }
 
 /* ================= 3. 重置 ================= */
@@ -289,7 +338,8 @@ console.log('\n[4] 既有功能回归');
   ok(h.includes('背诵范围与每日数量') && h.includes('每日背诵个数'), '首页范围/每日数量选择器仍在');
   ok(h.includes('A–R · 342 词根 · 819 单词'), '标题统计正确');
   ok(a.query().some(e => e.dataset.daily === '10'), '每日数量快捷按钮仍在');
-  ok(h.includes('基本 3 轮'), '首页流程说明显示基本 3 轮');
+  ok(h.includes('id="new-rounds"') && h.includes('新学按首页设置考 3 轮'), '首页提供新学轮数选择并默认显示 3 轮');
+  ok(h.includes('共 8 种') && h.includes('跨轮次不重复'), '首页说明 8 种题型与跨轮次题目去重');
   ok(!h.includes('data-scope'), '已移除旧的「第二轮范围」开关');
 
   studyAll(a);
@@ -356,6 +406,92 @@ console.log('\n[6] 边界与异常');
   ok(d.appEl.innerHTML.includes('value="1"'), '每日数量 0 被钳制为 1');
   DB(d).set.daily = 5000; d.click({ nav: 'home' });
   ok(d.appEl.innerHTML.includes('value="999"'), '每日数量 5000 被钳制为 999');
+}
+
+/* ================= 7. 三模块入口与单词拼写 ================= */
+console.log('\n[7] 三模块入口与单词拼写');
+{
+  const markLearned = (app, target) => {
+    let count = 0;
+    for(const r of app.T.scopeRoots()){
+      if(count >= target) break;
+      DB(app).rec[r.id] = {level:0};
+      count += r.words.length;
+    }
+    return count;
+  };
+
+  const a = loadApp({});
+  const h = a.appEl.innerHTML;
+  ok(h.includes('class="modules"'), '首页使用三模块并列布局');
+  ok(h.includes('data-act="start-new"') && h.includes('data-act="start-review"') && h.includes('data-act="start-spelling"'),
+    '新学、复习、拼写测试三个入口均存在');
+  ok(!h.includes('data-act="start-today"'), '旧的合并式今日学习入口已移除');
+
+  a.click({ act: 'start-spelling' });
+  ok(S(a) === null && a.appEl.innerHTML.includes('当前范围还没有已学单词'), '没有已学词根时不开始拼写测试并提示先新学');
+
+  markLearned(a, 5);
+  DB(a).set.daily = 5;
+  a.click({ nav: 'home' });
+  const beforeRec = JSON.stringify(DB(a).rec);
+  a.click({ act: 'start-spelling' });
+  ok(S(a).phase === 'spelling' && S(a).spellQueue.length === 5, '拼写测试按每日数量抽取 5 个单词', S(a).spellQueue.length);
+  ok(S(a).spellQueue.every(item => DB(a).rec[item.r.id]), '默认抽题只包含已学词根的单词');
+  ok(a.appEl.innerHTML.includes('id="spell-input"') && a.appEl.innerHTML.includes(S(a).spellQueue[0].w.senses[0].cn),
+    '拼写页显示中文释义与输入框');
+
+  S(a).spellInput = '   ';
+  a.click({ act: 'spell-submit' });
+  ok(!S(a).spellAnswered, '空白拼写不判定、不前进');
+
+  let item = S(a).spellQueue[S(a).spellIdx];
+  S(a).spellInput = '  ' + item.w.w.toUpperCase() + '  ';
+  a.click({ act: 'spell-submit' });
+  ok(S(a).spellAnswered && S(a).spellOk && S(a).spellRight === 1, '忽略首尾空格与大小写判定拼写正确');
+  a.click({ act: 'spell-next' });
+  ok(S(a).spellIdx === 1 && !S(a).spellAnswered && S(a).spellInput === '', '下一题重置输入与答题状态');
+
+  item = S(a).spellQueue[S(a).spellIdx];
+  S(a).spellInput = 'definitely-wrong';
+  a.click({ act: 'spell-submit' });
+  ok(!S(a).spellOk && S(a).spellWrong.length === 1 && a.appEl.innerHTML.includes('正确答案：' + item.w.w),
+    '拼错时记录错题并显示正确拼写');
+
+  while(S(a).phase === 'spelling'){
+    if(!S(a).spellAnswered){
+      S(a).spellInput = S(a).spellQueue[S(a).spellIdx].w.w;
+      a.click({ act: 'spell-submit' });
+    }
+    a.click({ act: 'spell-next' });
+  }
+  ok(S(a).phase === 'done' && S(a).spellRight === 4 && S(a).spellWrong.length === 1, '整组完成后统计 4 对 1 错', S(a).spellRight);
+  ok(a.appEl.innerHTML.includes('拼写测试完成') && a.appEl.innerHTML.includes(item.w.w), '结果页显示完成统计与拼错单词');
+  ok(JSON.stringify(DB(a).rec) === beforeRec, '拼写测试不创建或修改复习记录');
+
+  a.click({ act: 'spell-again' });
+  ok(S(a).phase === 'spelling' && S(a).spellIdx === 0 && S(a).spellRight === 0, '再测一组重置本次统计');
+
+  const b = loadApp({});
+  const learnedCount = markLearned(b, 1);
+  DB(b).set.daily = 5;
+  b.click({ nav: 'home' });
+  ok(learnedCount < 5 && b.appEl.innerHTML.includes('已学单词不足设定的 5 个') && b.appEl.innerHTML.includes('data-act="start-spelling-fill"'),
+    '已学单词不足时显示数量提示和补入未学按钮');
+  b.click({ act: 'start-spelling' });
+  ok(S(b).spellQueue.length === learnedCount && S(b).spellQueue.every(item => DB(b).rec[item.r.id]),
+    '数量不足时只测已学模式不补入未学单词');
+
+  const c = loadApp({});
+  const fillLearnedCount = markLearned(c, 1);
+  DB(c).set.daily = 5;
+  c.click({ nav: 'home' });
+  const fillBeforeRec = JSON.stringify(DB(c).rec);
+  c.click({ act: 'start-spelling-fill' });
+  ok(S(c).spellQueue.length === 5 && S(c).spellQueue.filter(item => DB(c).rec[item.r.id]).length === fillLearnedCount,
+    '补入未学模式保留全部已学单词并补足设定题数');
+  ok(S(c).spellQueue.some(item => !DB(c).rec[item.r.id]) && S(c).spellFill, '补入未学模式确实包含未学词根单词');
+  ok(JSON.stringify(DB(c).rec) === fillBeforeRec, '补入未学单词不会把未学词根标记为已学');
 }
 
 console.log('\n===== 结果：' + pass + ' passed, ' + fail + ' failed =====');

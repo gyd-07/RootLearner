@@ -28,7 +28,7 @@ nav.tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff}
 .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
 .field{display:flex;flex-direction:column;gap:5px}
 .field label{font-size:12.5px;color:var(--muted)}
-select,input[type=number]{background:#fff;border:1px solid var(--line);border-radius:9px;
+select,input[type=number],input[type=text]{background:#fff;border:1px solid var(--line);border-radius:9px;
   padding:8px 10px;font-size:14px;font-family:inherit;color:var(--ink);min-width:110px}
 select:focus,input:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -112,9 +112,17 @@ ul.plain li{margin-bottom:4px}
 .wronglist{display:flex;flex-wrap:wrap;gap:7px}
 .wronglist span{background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:4px 10px;font-size:13px}
 .oklist span{background:var(--ok-soft);color:var(--ok);border-radius:8px;padding:4px 10px;font-size:13px}
+.modules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.module{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column}
+.module h3{margin:0 0 6px;font-size:17px}
+.module .hint{flex:1}
+.module .btn{width:100%;margin-top:14px;padding-left:10px;padding-right:10px}
+.spell-prompt{font-size:23px;font-weight:650;margin:8px 0 14px}
+.spell-prompt .p{color:var(--brand);font-size:15px;font-weight:500}
+.spell-input{width:100%;font-size:21px!important;padding:13px 15px!important;margin-top:16px}
 @media (max-width:600px){
   .rootform{font-size:26px}.qtext{font-size:18px}.panel{padding:14px}
-  .face{padding:20px 16px}.flipcard{min-height:330px}
+  .face{padding:20px 16px}.flipcard{min-height:330px}.modules{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -123,8 +131,8 @@ ul.plain li{margin-bottom:4px}
 <script>
 const DATA = /*__DATA__*/null;
 const INTERVALS = [1,2,4,7,15,30];   // 艾宾浩斯复习间隔（天）
-const MIN_ROUNDS = 3;                 // 每次测试的基本轮数（至少考 3 轮）
-const MAX_ROUNDS = 8;                 // 出现错题时逐轮追加补考，最多 8 轮
+const MIN_ROUNDS = 3;                 // 默认新学轮数，同时也是复习的固定轮数
+const MAX_ROUNDS = 8;                 // 新学基础轮数上限，也是错题补考的总轮数上限
 const KEY = 'rootLearner.v1';
 
 const mem = {};
@@ -144,7 +152,7 @@ function load(){
     const o = JSON.parse(store.get(KEY));
     if(o && o.rec && o.set) return o;
   }catch(e){}
-  return {rec:{}, set:{from:DATA.letters[0], to:DATA.letters[DATA.letters.length-1], daily:20}, orderKey:null, orderPool:[]};
+  return {rec:{}, set:{from:DATA.letters[0], to:DATA.letters[DATA.letters.length-1], daily:20, newRounds:MIN_ROUNDS}, orderKey:null, orderPool:[]};
 }
 function save(){ store.set(KEY, JSON.stringify(DB)); }
 function today(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); }
@@ -164,6 +172,10 @@ const label = r => r.forms.join(', ');
 const cnOf = w => w.senses.map(s=>s.cn).join('；');
 const wordLine = w => w.w + ' ' + w.senses.map(s=>s.pos+' '+s.cn).join('；');
 const mastered = rec => rec && rec.level >= INTERVALS.length;
+function newRoundCount(value){
+  const n = parseInt(value === undefined ? DB.set.newRounds : value, 10);
+  return isNaN(n) ? MIN_ROUNDS : Math.max(1, Math.min(MAX_ROUNDS, n));
+}
 
 function lettersInRange(){
   let i = DATA.letters.indexOf(DB.set.from), j = DATA.letters.indexOf(DB.set.to);
@@ -221,36 +233,50 @@ function otherRoots(r){
 }
 function flatWords(list){ const o=[]; list.forEach(r=>r.words.forEach(w=>o.push(w))); return o; }
 
-function makeQuestion(id){
+function makeQuestion(id, asked=new Set()){
   const r = byId(id);
   const others = otherRoots(r);
-  const types = [1,2,3,4,5,6];
-  const t = types[Math.floor(Math.random()*types.length)];
-  const w = r.words[Math.floor(Math.random()*r.words.length)];
   const L = label(r);
+  const candidates = [{t:1,key:'1'}, {t:2,key:'2'}];
+  r.words.forEach((w,wi)=>{
+    for(let t=3;t<=8;t++) candidates.push({t,wi,key:t+':'+wi});
+  });
+  const pool = candidates.filter(c=>!asked.has(c.key));
+  const c = pool[Math.floor(Math.random()*pool.length)];
+  asked.add(c.key);
+  const t = c.t;
+  const w = c.wi === undefined ? r.words[Math.floor(Math.random()*r.words.length)] : r.words[c.wi];
 
-  if(t===1) return {type:'词根 → 词根释义', id,
+  if(t===1) return {type:'词根 → 词根释义', id, key:c.key,
     text:'词根 <em>'+esc(L)+'</em> 的含义是？',
     opts: uniqueOpts(r.meaningEn, others.map(x=>x.meaningEn), 3), ans:r.meaningEn, r, w};
 
-  if(t===2) return {type:'词根释义 → 词根', id,
+  if(t===2) return {type:'词根释义 → 词根', id, key:c.key,
     text:'含义为 <em>'+esc(r.meaningEn)+'</em> 的词根是？',
     opts: uniqueOpts(L, others.map(x=>label(x)), 3), ans:L, r, w};
 
-  if(t===3) return {type:'单词 → 中文释义', id,
+  if(t===3) return {type:'单词 → 中文释义', id, key:c.key,
     text:'单词 <em>'+esc(w.w)+'</em> 的中文释义是？',
     opts: uniqueOpts(cnOf(w), flatWords(others).map(x=>cnOf(x)), 3), ans:cnOf(w), r, w};
 
-  if(t===4) return {type:'中文释义 → 单词', id,
+  if(t===4) return {type:'中文释义 → 单词', id, key:c.key,
     text:'中文释义 <em>'+esc(cnOf(w))+'</em> 对应哪个单词？',
     opts: uniqueOpts(w.w, flatWords(others).map(x=>x.w), 3), ans:w.w, r, w};
 
-  if(t===5) return {type:'单词 → 词根', id,
+  if(t===5) return {type:'单词 → 词根', id, key:c.key,
     text:'单词 <em>'+esc(w.w)+'</em> 属于哪个词根？',
     opts: uniqueOpts(L, others.map(x=>label(x)), 3), ans:L, r, w};
 
-  return {type:'词根 → 单词', id,
+  if(t===6) return {type:'词根 → 单词', id, key:c.key,
     text:'下列哪个单词含有词根 <em>'+esc(L)+'</em> ？',
+    opts: uniqueOpts(w.w, flatWords(others).map(x=>x.w), 3), ans:w.w, r, w};
+
+  if(t===7) return {type:'单词 → 词根释义', id, key:c.key,
+    text:'单词 <em>'+esc(w.w)+'</em> 所属词根的含义是？',
+    opts: uniqueOpts(r.meaningEn, others.map(x=>x.meaningEn), 3), ans:r.meaningEn, r, w};
+
+  return {type:'词根释义 → 单词', id, key:c.key,
+    text:'下列哪个单词所属词根的含义为 <em>'+esc(r.meaningEn)+'</em> ？',
     opts: uniqueOpts(w.w, flatWords(others).map(x=>x.w), 3), ans:w.w, r, w};
 }
 
@@ -263,21 +289,22 @@ function startSession(cards, mode){
   });
   save();
   S = {cards: shuffle(cards), mode, phase:'study', idx:0, revealed:false,
-       round:0, queue:[], qidx:0, q:null, answered:false, picked:-1,
+       baseRounds:mode==='new' ? newRoundCount() : MIN_ROUNDS,
+       round:0, queue:[], qidx:0, q:null, answered:false, picked:-1, asked:{},
        wrong:{}, roundWrong:[], roundLog:[], totalOk:0, totalNo:0};
   msg=''; view='session'; render();
 }
-/* 第 1~3 轮考全部卡片；第 4 轮起为追加补考，只考上一轮答错的卡片 */
+/* 基础轮考全部卡片；之后为追加补考，只考上一轮答错的卡片 */
 function roundQueue(round, prevWrong){
-  if(round <= MIN_ROUNDS) return S.cards.slice();
+  if(round <= S.baseRounds) return S.cards.slice();
   return prevWrong.slice();
 }
 function roundLabel(round){
-  return round<=MIN_ROUNDS ? '第 '+round+' 轮测试' : '第 '+round+' 轮（错题补考）';
+  return round<=S.baseRounds ? '第 '+round+' 轮测试' : '第 '+round+' 轮（错题补考）';
 }
 /* 是否还能继续下一轮：未考满基本轮数(NaN 视作未满)，或已考满但本轮有错题且未达上限 */
 function roundNo(){ const n = parseInt(S.round,10); return isNaN(n) ? 1 : n; }
-function mustContinue(){ return roundNo() < MIN_ROUNDS; }                       // 基本轮数用满之前必须继续
+function mustContinue(){ return roundNo() < S.baseRounds; }
 function canContinue(){ return mustContinue() || (S.roundWrong.length>0 && roundNo() < MAX_ROUNDS); }
 function beginRound(){
   S.round++;
@@ -291,7 +318,9 @@ function nextQuestion(){
     S.roundLog.push({round:S.round, total:S.queue.length, wrong:S.roundWrong.length});
     S.phase='roundend'; render(); return;
   }
-  S.q = makeQuestion(S.queue[S.qidx]);
+  const id = S.queue[S.qidx];
+  if(!S.asked[id]) S.asked[id] = new Set();
+  S.q = makeQuestion(id, S.asked[id]);
   S.answered=false; S.picked=-1; S.phase='quiz'; render();
 }
 function answer(i){
@@ -340,6 +369,42 @@ function nextBatch(){
   startSession(cards,'new');
 }
 
+/* ---------- 单词拼写测试：独立计分，不写复习进度 ---------- */
+function startSpelling(fillNew=false){
+  const learnedWords = [], newWords = [];
+  scopeRoots().forEach(r=>r.words.forEach(w=>(DB.rec[r.id] ? learnedWords : newWords).push({r,w})));
+  const n = Math.max(1, Math.min(999, DB.set.daily|0));
+  let queue = shuffle(learnedWords);
+  if(fillNew) queue = queue.concat(shuffle(newWords));
+  queue = queue.slice(0,n);
+  if(!queue.length){ msg='当前范围还没有已学单词，请先完成新学。'; view='home'; render(); return; }
+  S = {mode:'spelling', phase:'spelling', spellQueue:queue, spellIdx:0, spellFill:fillNew,
+       spellInput:'', spellAnswered:false, spellOk:false, spellRight:0, spellWrong:[]};
+  msg=''; view='session'; render();
+}
+function submitSpelling(){
+  if(!S || S.mode!=='spelling' || S.phase!=='spelling' || S.spellAnswered) return;
+  const input = document.getElementById('spell-input');
+  if(input) S.spellInput = input.value;
+  if(!S.spellInput.trim()){ msg='请先输入单词拼写。'; render(); return; }
+  const item = S.spellQueue[S.spellIdx];
+  S.spellOk = S.spellInput.trim().toLowerCase() === item.w.w.trim().toLowerCase();
+  S.spellAnswered = true;
+  if(S.spellOk) S.spellRight++;
+  else S.spellWrong.push(item);
+  msg=''; render();
+}
+function nextSpelling(){
+  if(!S || S.mode!=='spelling' || !S.spellAnswered) return;
+  if(S.spellIdx >= S.spellQueue.length-1){
+    S.phase='done';
+  }else{
+    S.spellIdx++;
+    S.spellInput=''; S.spellAnswered=false; S.spellOk=false;
+  }
+  render();
+}
+
 /* ---------- rendering ---------- */
 function el(html){ return html; }
 
@@ -357,12 +422,16 @@ function homeHtml(){
   const learned = sc.filter(r=>DB.rec[r.id]);
   const mst = learned.filter(r=>mastered(DB.rec[r.id]));
   const daily = Math.max(1, Math.min(999, DB.set.daily|0));
+  const baseRounds = newRoundCount();
   const newCards = pickNew(daily);
   const take = newCards.length;
-  const batch = new Set(newCards.map(r=>r.id));
-  due.forEach(r=>batch.add(r.id));
+  const spellTotal = wordCount(learned);
+  const spellN = Math.min(daily, spellTotal);
+  const spellShort = spellTotal > 0 && spellTotal < daily;
+  const spellFillN = Math.min(daily, wordCount(sc));
 
   const letterOpts = L => DATA.letters.map(x=>'<option value="'+x+'"'+(x===L?' selected':'')+'>'+x+'</option>').join('');
+  const roundOpts = Array.from({length:MAX_ROUNDS},(_,i)=>i+1).map(n=>'<option value="'+n+'"'+(n===baseRounds?' selected':'')+'>'+n+' 轮</option>').join('');
   const presets = [10,20,30,50,80];
   const preview = newCards.slice(0,6).map(r=>esc(label(r))).join('、');
 
@@ -372,8 +441,9 @@ function homeHtml(){
     '<div class="row">'+
       '<div class="field"><label>起始字母</label><select id="from">'+letterOpts(DB.set.from)+'</select></div>'+
       '<div class="field"><label>结束字母</label><select id="to">'+letterOpts(DB.set.to)+'</select></div>'+
-      '<div class="field"><label>每日背诵个数（词根卡片）</label>'+
+      '<div class="field"><label>每日背诵个数（兼作拼写测试题数）</label>'+
         '<input type="number" id="daily" min="1" max="999" value="'+daily+'"></div>'+
+      '<div class="field"><label>新学测试轮数（复习固定 3 轮）</label><select id="new-rounds">'+roundOpts+'</select></div>'+
     '</div>'+
     '<div style="height:12px"></div>'+
     '<div class="chips">'+presets.map(p=>'<button class="chip'+(p===daily?' on':'')+'" data-daily="'+p+'">'+p+' 个/天</button>').join('')+
@@ -399,22 +469,30 @@ function homeHtml(){
       '<div class="stat"><b>'+un.length+'</b><i>范围内未学</i></div>'+
     '</div>'+
     '<div style="height:16px"></div>'+
-    '<div class="btnrow">'+
-      '<button class="btn" data-act="start-today"'+(batch.size?'':' disabled')+'>开始今日学习（'+batch.size+' 张卡片）</button>'+
-      '<button class="btn ghost" data-act="start-review"'+(due.length?'':' disabled')+'>只复习到期（'+due.length+'）</button>'+
-      '<button class="btn ghost" data-act="start-new"'+(take?'':' disabled')+'>只学新词根（'+take+'）</button>'+
+    '<div class="modules">'+
+      '<div class="module"><h3>新学</h3>'+
+        '<div class="hint">从当前范围按乱序抽取新词根，翻面学习后自动进入选择题测试。</div>'+
+        '<button class="btn" data-act="start-new"'+(take?'':' disabled')+'>开始新学（'+take+' 张卡片）</button></div>'+
+      '<div class="module"><h3>复习</h3>'+
+        '<div class="hint">只学习今天到期的卡片，答错会重置掌握等级并安排明天复习。</div>'+
+        '<button class="btn ghost" data-act="start-review"'+(due.length?'':' disabled')+'>开始复习（'+due.length+' 张卡片）</button></div>'+
+      '<div class="module"><h3>测试</h3>'+
+        '<div class="hint">仅从已学词根的 '+spellTotal+' 个单词中抽题，根据中文释义拼写英文；独立计分，不改变复习进度。</div>'+
+        (spellShort ? '<div class="hint" style="margin-top:10px;color:var(--warn);flex:none">已学单词不足设定的 '+daily+' 个，可只测已学或补入未学单词。</div>' : '')+
+        '<button class="btn soft" data-act="start-spelling"'+(spellN?'':' disabled')+'>'+(spellShort?'只测已学':'开始拼写测试')+'（'+spellN+' 个单词）</button>'+
+        (spellShort && wordCount(un) ? '<button class="btn ghost" style="margin-top:8px" data-act="start-spelling-fill">补入未学单词（共 '+spellFillN+' 个）</button>' : '')+
+      '</div>'+
     '</div>'+
-    '<div style="height:10px"></div>'+
-    '<div class="hint">今日学习 = 范围内乱序抽取的 '+take+' 个新词根 + 到期复习 '+due.length+' 个（去重后共 '+batch.size+' 张卡片）</div>'+
   '</div>'+
 
   '<div class="panel">'+
     '<h2>流程说明</h2>'+
     '<ul class="plain">'+
       '<li><b>学习阶段</b>：本次全部卡片按乱序依次翻面学习（正面＝词根＋英文释义，背面＝单词＋词性＋中文释义）。</li>'+
-      '<li><b>测试阶段</b>：学完后自动进入第一轮测试，<b>第 1～3 轮都考全部卡片</b>（每轮题目与顺序重新乱序）；'+
-        '若第 3 轮仍有错题，则自动追加补考轮（只考上一轮错题），每有错题就再加一轮，最多 '+MAX_ROUNDS+' 轮。</li>'+
-      '<li><b>题型</b>：词根↔词根释义、单词↔中文释义、单词↔所属词根，共 6 种，四选一。</li>'+
+      '<li><b>测试阶段</b>：新学按首页设置考 '+baseRounds+' 轮，复习固定 '+MIN_ROUNDS+' 轮，基础轮都考全部卡片；'+
+        '若基础轮结束仍有错题且未满 '+MAX_ROUNDS+' 轮，则追加补考（只考上一轮错题）。同一词根跨轮次不重复已出的题型与例词组合。</li>'+
+      '<li><b>题型</b>：词根↔词根释义、单词↔中文释义、单词↔所属词根、单词↔词根释义，共 8 种，四选一。</li>'+
+      '<li><b>拼写测试</b>：默认只从当前范围的已学词根中随机抽词；已学单词不足时可只测已学，或选择补入未学单词。独立计分，不改变掌握等级和复习计划。</li>'+
       '<li><b>复习安排</b>：全部答对的卡片按艾宾浩斯间隔 1/2/4/7/15/30 天推后复习；本轮答错过则等级归零、明天重来。</li>'+
       '<li><b>进度重置</b>：可只重置当前字母范围的进度（重新乱序并重学），也可在「学习记录」页清空全部进度。</li>'+
       '<li>数据保存在本浏览器（localStorage），换浏览器或清理数据会丢失进度。</li>'+
@@ -423,10 +501,58 @@ function homeHtml(){
 }
 
 function sessionHtml(){
+  if(S.mode==='spelling') return S.phase==='done' ? spellingDoneHtml() : spellingHtml();
   if(S.phase==='study') return studyHtml();
   if(S.phase==='quiz') return quizHtml();
   if(S.phase==='roundend') return roundEndHtml();
   return doneHtml();
+}
+
+function spellingHtml(){
+  const item = S.spellQueue[S.spellIdx];
+  const w = item.w, r = item.r;
+  const total = S.spellQueue.length;
+  const pct = ((S.spellIdx + (S.spellAnswered?1:0))/total*100).toFixed(1);
+  return '<div class="panel" style="padding:16px">'+
+    '<div class="pbar-txt"><span>单词拼写测试</span><span>'+(S.spellIdx+1)+' / '+total+'</span></div>'+
+    '<div class="progress"><i style="width:'+pct+'%"></i></div>'+
+    '<div class="qbox">'+
+      '<div class="qmeta"><span class="qtype">中文释义 → 英文拼写</span><span>已答对 '+S.spellRight+' 题</span></div>'+
+      '<div class="qtext">请写出下列释义对应的英文单词</div>'+
+      '<div class="spell-prompt">'+w.senses.map(s=>'<span class="p">'+esc(s.pos)+'</span> '+esc(s.cn)).join('；')+'</div>'+
+      '<div class="hint">所属词根：'+esc(label(r))+'（'+esc(r.meaningEn)+'）</div>'+
+      '<input type="text" id="spell-input" class="spell-input" placeholder="输入英文单词，按 Enter 提交" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(S.spellInput)+'"'+(S.spellAnswered?' disabled':'')+'>'+
+      (S.spellAnswered ? '<div class="explain"><div class="hd '+(S.spellOk?'ok':'bad')+'">'+
+        (S.spellOk?'拼写正确':'拼写错误 · 正确答案：'+esc(w.w))+'</div>'+
+        '<div class="rr">'+esc(wordLine(w))+'</div></div>' : '')+
+      '<div class="btnrow" style="margin-top:14px">'+
+        (S.spellAnswered
+          ? '<button class="btn sm" data-act="spell-next">'+(S.spellIdx+1>=total?'查看结果':'下一题')+'</button>'
+          : '<button class="btn sm" data-act="spell-submit">提交拼写</button>')+
+        '<button class="btn ghost sm" data-act="quit">退出</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function spellingDoneHtml(){
+  const total = S.spellQueue.length;
+  const acc = total ? Math.round(S.spellRight/total*100) : 0;
+  return '<div class="panel">'+
+    '<h2>拼写测试完成</h2>'+
+    '<div class="summary">'+
+      '<div><span class="big">'+acc+'%</span> <span class="hint">正确率（'+S.spellRight+'/'+total+' 题）</span></div>'+
+      (S.spellWrong.length
+        ? '<div><div class="hint" style="margin-bottom:6px">拼错单词（'+S.spellWrong.length+'）</div><div class="wronglist">'+
+          S.spellWrong.map(item=>'<span>'+esc(item.w.w)+'</span>').join('')+'</div></div>'
+        : '<div class="note">本次全部拼写正确。</div>')+
+      '<div class="note">拼写测试仅用于独立练习，不改变词根掌握等级和复习计划。</div>'+
+      '<div class="btnrow">'+
+        '<button class="btn" data-act="spell-again">再测一组</button>'+
+        '<button class="btn ghost" data-nav="home">返回首页</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
 }
 
 function studyHtml(){
@@ -507,7 +633,7 @@ function roundEndHtml(){
   const nWrong = S.roundWrong.length;
   const another = canContinue();
   const must = mustContinue();
-  const nextN = another ? (S.round+1<=MIN_ROUNDS ? S.cards.length : nWrong) : 0;
+  const nextN = another ? (S.round+1<=S.baseRounds ? S.cards.length : nWrong) : 0;
   const passed = !must;
   return '<div class="panel">'+
     '<h2>'+roundLabel(log.round)+'结果</h2>'+
@@ -519,13 +645,13 @@ function roundEndHtml(){
         : '<div class="note">本轮全部答对。</div>')+
       '<div class="note">'+
         (must
-          ? '基本轮数共 '+MIN_ROUNDS+' 轮，当前是第 '+log.round+' 轮，继续考第 '+(log.round+1)+' 轮（全部卡片重考）。'
+          ? '基本轮数共 '+S.baseRounds+' 轮，当前是第 '+log.round+' 轮，继续考第 '+(log.round+1)+' 轮（全部卡片重考）。'
           : (another
-              ? '已考满基本轮数（'+MIN_ROUNDS+' 轮），但本轮仍有 '+nWrong+' 个错题，自动追加第 '+(log.round+1)+' 轮补考。'
+              ? '已考满基本轮数（'+S.baseRounds+' 轮），但本轮仍有 '+nWrong+' 个错题，自动追加第 '+(log.round+1)+' 轮补考。'
               : (nWrong ? '已达到最大轮数（'+MAX_ROUNDS+' 轮），剩余错题将在明天重新复习。' : '基本轮数与错题补考已全部通过。')))+
       '</div>'+
       '<div class="btnrow">'+
-        (another ? '<button class="btn" data-act="next-round">开始第 '+(log.round+1)+' 轮'+(log.round+1>MIN_ROUNDS?'补考（'+nextN+' 题）':'（'+nextN+' 题）')+'</button>' : '')+
+        (another ? '<button class="btn" data-act="next-round">开始第 '+(log.round+1)+' 轮'+(log.round+1>S.baseRounds?'补考（'+nextN+' 题）':'（'+nextN+' 题）')+'</button>' : '')+
         '<button class="btn ghost" data-act="finish">结束并保存进度</button>'+
       '</div>'+
     '</div>'+
@@ -546,7 +672,7 @@ function doneHtml(){
         '<div class="stat bad"><b>'+S.down+'</b><i>需重新复习</i></div>'+
         '<div class="stat brand"><b>'+(nxt?relDays(nxt.next):'—')+'</b><i>最近一次复习</i></div>'+
       '</div>'+
-      '<div class="note">本次共完成 '+S.round+' 轮测试（基本 '+MIN_ROUNDS+' 轮'+(S.round>MIN_ROUNDS?'，含 '+ (S.round-MIN_ROUNDS) +' 轮错题补考':'')+'）。全部答对的卡片已按艾宾浩斯间隔（1/2/4/7/15/30 天）排入复习计划；答错过的卡片明天需要重新复习。</div>'+
+      '<div class="note">本次共完成 '+S.round+' 轮测试（基本 '+S.baseRounds+' 轮'+(S.round>S.baseRounds?'，含 '+ (S.round-S.baseRounds) +' 轮错题补考':'')+'）。全部答对的卡片已按艾宾浩斯间隔（1/2/4/7/15/30 天）排入复习计划；答错过的卡片明天需要重新复习。</div>'+
       '<div class="btnrow">'+
         '<button class="btn" data-act="again">再学一批新词根</button>'+
         '<button class="btn ghost" data-nav="plan">查看复习计划</button>'+
@@ -632,7 +758,7 @@ function render(){
   else if(view==='records') body = recordsHtml();
 
   document.getElementById('app').innerHTML =
-    '<header class="top"><h1>词根<span>背诵</span> <span style="font-size:12px;color:var(--muted);font-weight:400">A–R · '+DATA.roots.length+' 词根 · '+wordCount(DATA.roots)+' 单词 · 乱序 · 基本 '+MIN_ROUNDS+' 轮</span></h1>'+navHtml()+'</header>'+
+    '<header class="top"><h1>词根<span>背诵</span> <span style="font-size:12px;color:var(--muted);font-weight:400">A–R · '+DATA.roots.length+' 词根 · '+wordCount(DATA.roots)+' 单词 · 乱序 · 新学 '+newRoundCount()+' 轮</span></h1>'+navHtml()+'</header>'+
     (STORE_OK ? '' : '<div class="flash">浏览器禁用了本地存储，学习记录仅保存在本次打开期间，关闭后会丢失。</div>')+
     (msg ? '<div class="flash">'+esc(msg)+'</div>' : '')+
     body;
@@ -641,10 +767,13 @@ function render(){
 }
 
 function bindInputs(){
-  const f=document.getElementById('from'), t=document.getElementById('to'), d=document.getElementById('daily');
+  const f=document.getElementById('from'), t=document.getElementById('to'), d=document.getElementById('daily'), nr=document.getElementById('new-rounds');
   if(f) f.onchange = e=>{ DB.set.from=e.target.value; ensureOrder(); save(); render(); };
   if(t) t.onchange = e=>{ DB.set.to=e.target.value; ensureOrder(); save(); render(); };
   if(d) d.onchange = e=>{ DB.set.daily=Math.max(1,Math.min(999,parseInt(e.target.value,10)||1)); save(); render(); };
+  if(nr) nr.onchange = e=>{ DB.set.newRounds=newRoundCount(e.target.value); save(); render(); };
+  const si=document.getElementById('spell-input');
+  if(si && S && S.mode==='spelling' && !S.spellAnswered) si.focus();
 }
 
 /* 重置指定字母范围内的学习进度 */
@@ -701,18 +830,22 @@ document.getElementById('app').addEventListener('click', e=>{
       resetAll(); msg='已清空全部学习进度，并重新乱序。'; view='home'; S=null; render();
     }
   }
-  else if(a==='start-today'){
-    const ids = pickNew(DB.set.daily).map(r=>r.id);
-    const set = new Set(ids);
-    dueList().forEach(r=>{ if(!set.has(r.id)){ set.add(r.id); ids.push(r.id); } });
-    startSession(ids,'mixed');
-  }
+  else if(a==='start-spelling'){ startSpelling(); }
+  else if(a==='start-spelling-fill'){ startSpelling(true); }
+  else if(a==='spell-submit'){ submitSpelling(); }
+  else if(a==='spell-next'){ nextSpelling(); }
+  else if(a==='spell-again'){ startSpelling(S.spellFill); }
   else if(a==='start-review'){ startSession(dueList().map(r=>r.id),'review'); }
   else if(a==='start-new'){ startSession(pickNew(DB.set.daily).map(r=>r.id),'new'); }
 });
 
 document.addEventListener('keydown', e=>{
   if(view!=='session' || !S) return;
+  if(S.mode==='spelling' && S.phase==='spelling' && e.key==='Enter'){
+    e.preventDefault();
+    if(S.spellAnswered) nextSpelling(); else submitSpelling();
+    return;
+  }
   if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
   if(S.phase==='study'){
     if(e.code==='Space'){ e.preventDefault(); S.revealed=!S.revealed; render(); }

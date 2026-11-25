@@ -150,13 +150,52 @@ let msg = '';
 function load(){
   try{
     const o = JSON.parse(store.get(KEY));
-    if(o && o.rec && o.set) return o;
+    if(o && o.rec && o.set){
+      let changed = false;
+      if(o.rec[27]){
+        if(!o.rec[26]) o.rec[26]=o.rec[27];
+        delete o.rec[27];
+        changed = true;
+      }
+      if(!Number.isFinite(o.scheduleChecked)){
+        o.scheduleChecked = Object.values(o.rec).reduce((latest, rec)=>Math.max(latest, rec.last||0), 0) || today();
+        changed = true;
+      }
+      if(changed) store.set(KEY, JSON.stringify(o));
+      return o;
+    }
   }catch(e){}
-  return {rec:{}, set:{from:DATA.letters[0], to:DATA.letters[DATA.letters.length-1], daily:20, newRounds:MIN_ROUNDS}, orderKey:null, orderPool:[]};
+  return {rec:{}, set:{from:DATA.letters[0], to:DATA.letters[DATA.letters.length-1], daily:20, newRounds:MIN_ROUNDS}, orderKey:null, orderPool:[], scheduleChecked:today()};
 }
 function save(){ store.set(KEY, JSON.stringify(DB)); }
 function today(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); }
 function addDays(ms,n){ const d=new Date(ms); d.setDate(d.getDate()+n); d.setHours(0,0,0,0); return d.getTime(); }
+function moveSchedule(days){
+  const n = Math.max(0, parseInt(days,10)||0);
+  Object.values(DB.rec).forEach(rec=>{
+    if(Number.isFinite(rec.next) && rec.next>0) rec.next = addDays(rec.next,n);
+  });
+  return n;
+}
+function shiftSchedule(days){
+  const n = moveSchedule(days);
+  if(n) save();
+  return n;
+}
+function rolloverSchedule(){
+  const target = addDays(today(),-1);
+  if(!Number.isFinite(DB.scheduleChecked) || DB.scheduleChecked>=target) return 0;
+  let cursor = DB.scheduleChecked, shifted = 0;
+  while(cursor<target){
+    const missed = addDays(cursor,1);
+    const hadPlan = Object.values(DB.rec).some(rec=>Number.isFinite(rec.next) && rec.next>0 && rec.next<=missed);
+    if(hadPlan){ moveSchedule(1); shifted++; }
+    cursor = missed;
+  }
+  DB.scheduleChecked = target;
+  save();
+  return shifted;
+}
 function fmt(ms){ const d=new Date(ms); return (d.getMonth()+1)+'月'+d.getDate()+'日'; }
 function relDays(ms){
   const n = Math.round((ms - today())/86400000);
@@ -291,25 +330,25 @@ function startSession(cards, mode){
   S = {cards: shuffle(cards), mode, phase:'study', idx:0, revealed:false,
        baseRounds:mode==='new' ? newRoundCount() : MIN_ROUNDS,
        round:0, queue:[], qidx:0, q:null, answered:false, picked:-1, asked:{},
-       wrong:{}, roundWrong:[], roundLog:[], totalOk:0, totalNo:0};
+       wrong:{}, roundWrong:[], retry:[], roundLog:[], totalOk:0, totalNo:0};
   msg=''; view='session'; render();
 }
-/* 基础轮考全部卡片；之后为追加补考，只考上一轮答错的卡片 */
-function roundQueue(round, prevWrong){
+/* 基础轮考全部卡片；之后补考所有尚未通过的错题 */
+function roundQueue(round){
   if(round <= S.baseRounds) return S.cards.slice();
-  return prevWrong.slice();
+  return S.retry.slice();
 }
 function roundLabel(round){
   return round<=S.baseRounds ? '第 '+round+' 轮测试' : '第 '+round+' 轮（错题补考）';
 }
-/* 是否还能继续下一轮：未考满基本轮数(NaN 视作未满)，或已考满但本轮有错题且未达上限 */
+/* 是否还能继续下一轮：未考满基本轮数(NaN 视作未满)，或已考满但仍有待补考错题且未达上限 */
 function roundNo(){ const n = parseInt(S.round,10); return isNaN(n) ? 1 : n; }
 function mustContinue(){ return roundNo() < S.baseRounds; }
-function canContinue(){ return mustContinue() || (S.roundWrong.length>0 && roundNo() < MAX_ROUNDS); }
+function canContinue(){ return mustContinue() || (S.retry.length>0 && roundNo() < MAX_ROUNDS); }
 function beginRound(){
   S.round++;
   // 每一轮题目顺序都重新乱序
-  S.queue = shuffle(roundQueue(S.round, S.roundWrong));
+  S.queue = shuffle(roundQueue(S.round));
   S.qidx=0; S.roundWrong=[]; S.answered=false;
   nextQuestion();
 }
@@ -328,11 +367,14 @@ function answer(i){
   S.answered=true; S.picked=i;
   const id = S.q.id;
   const ok = S.q.opts[i] === S.q.ans;
-  if(ok){ S.totalOk++; }
-  else{
+  if(ok){
+    S.totalOk++;
+    if(S.round>S.baseRounds) S.retry=S.retry.filter(x=>x!==id);
+  }else{
     S.totalNo++;
     S.wrong[id] = (S.wrong[id]||0)+1;
     if(!S.roundWrong.includes(id)) S.roundWrong.push(id);
+    if(!S.retry.includes(id)) S.retry.push(id);
   }
   render();
 }
@@ -367,6 +409,12 @@ function nextBatch(){
   const cards = pickNew(DB.set.daily).map(r=>r.id);
   if(!cards.length){ msg='所选范围内已全部学完。'; view='home'; S=null; render(); return; }
   startSession(cards,'new');
+}
+function startChallenge(){
+  const roots = scopeRoots();
+  const cards = roots.filter(r=>DB.rec[r.id]).map(r=>r.id);
+  if(cards.length!==roots.length){ msg='请先完成当前范围的全部新学，再开始总复习大闯关。'; view='home'; S=null; render(); return; }
+  startSession(cards,'challenge');
 }
 
 /* ---------- 单词拼写测试：独立计分，不写复习进度 ---------- */
@@ -429,6 +477,7 @@ function homeHtml(){
   const spellN = Math.min(daily, spellTotal);
   const spellShort = spellTotal > 0 && spellTotal < daily;
   const spellFillN = Math.min(daily, wordCount(sc));
+  const challengeReady = sc.length>0 && un.length===0;
 
   const letterOpts = L => DATA.letters.map(x=>'<option value="'+x+'"'+(x===L?' selected':'')+'>'+x+'</option>').join('');
   const roundOpts = Array.from({length:MAX_ROUNDS},(_,i)=>i+1).map(n=>'<option value="'+n+'"'+(n===baseRounds?' selected':'')+'>'+n+' 轮</option>').join('');
@@ -475,7 +524,9 @@ function homeHtml(){
         '<button class="btn" data-act="start-new"'+(take?'':' disabled')+'>开始新学（'+take+' 张卡片）</button></div>'+
       '<div class="module"><h3>复习</h3>'+
         '<div class="hint">只学习今天到期的卡片，答错会重置掌握等级并安排明天复习。</div>'+
-        '<button class="btn ghost" data-act="start-review"'+(due.length?'':' disabled')+'>开始复习（'+due.length+' 张卡片）</button></div>'+
+        '<button class="btn ghost" data-act="start-review"'+(due.length?'':' disabled')+'>开始复习（'+due.length+' 张卡片）</button>'+
+        '<div class="hint" style="margin-top:12px;flex:none"><b>总复习大闯关</b>：挑战 '+DB.set.from+'–'+DB.set.to+' 范围内全部词根，不受到期日限制；'+(challengeReady?'已解锁，按普通复习进行 3 轮测试与错题补考。':'还剩 '+un.length+' 个未学词根，全部学完后解锁。')+'</div>'+
+        '<button class="btn soft" data-act="start-challenge"'+(challengeReady?'':' disabled')+'>总复习大闯关（'+learned.length+' / '+sc.length+'）</button></div>'+
       '<div class="module"><h3>测试</h3>'+
         '<div class="hint">仅从已学词根的 '+spellTotal+' 个单词中抽题，根据中文释义拼写英文；独立计分，不改变复习进度。</div>'+
         (spellShort ? '<div class="hint" style="margin-top:10px;color:var(--warn);flex:none">已学单词不足设定的 '+daily+' 个，可只测已学或补入未学单词。</div>' : '')+
@@ -489,9 +540,10 @@ function homeHtml(){
     '<h2>流程说明</h2>'+
     '<ul class="plain">'+
       '<li><b>学习阶段</b>：本次全部卡片按乱序依次翻面学习（正面＝词根＋英文释义，背面＝单词＋词性＋中文释义）。</li>'+
-      '<li><b>测试阶段</b>：新学按首页设置考 '+baseRounds+' 轮，复习固定 '+MIN_ROUNDS+' 轮，基础轮都考全部卡片；'+
-        '若基础轮结束仍有错题且未满 '+MAX_ROUNDS+' 轮，则追加补考（只考上一轮错题）。同一词根跨轮次不重复已出的题型与例词组合。</li>'+
+      '<li><b>测试阶段</b>：新学按首页设置考 '+baseRounds+' 轮，复习与总复习大闯关固定 '+MIN_ROUNDS+' 轮，基础轮都考全部卡片；'+
+        '若基础轮结束仍有错题且未满 '+MAX_ROUNDS+' 轮，则追加补考（只考尚未通过的错题）。同一词根跨轮次不重复已出的题型与例词组合。</li>'+
       '<li><b>题型</b>：词根↔词根释义、单词↔中文释义、单词↔所属词根、单词↔词根释义，共 8 种，四选一。</li>'+
+      '<li><b>总复习大闯关</b>：当前字母范围全部学完后解锁，集中复习范围内全部词根，不受每日数量与到期日期限制；成绩照常计入掌握等级和复习计划。</li>'+
       '<li><b>拼写测试</b>：默认只从当前范围的已学词根中随机抽词；已学单词不足时可只测已学，或选择补入未学单词。独立计分，不改变掌握等级和复习计划。</li>'+
       '<li><b>复习安排</b>：全部答对的卡片按艾宾浩斯间隔 1/2/4/7/15/30 天推后复习；本轮答错过则等级归零、明天重来。</li>'+
       '<li><b>进度重置</b>：可只重置当前字母范围的进度（重新乱序并重学），也可在「学习记录」页清空全部进度。</li>'+
@@ -580,7 +632,7 @@ function studyHtml(){
     '</div>';
 
   return '<div class="panel" style="padding:16px">'+
-    '<div class="pbar-txt"><span>学习阶段 · 翻面记忆</span><span>'+(S.idx+1)+' / '+total+'</span></div>'+
+    '<div class="pbar-txt"><span>'+(S.mode==='challenge'?'总复习大闯关 · 翻面复习':'学习阶段 · 翻面记忆')+'</span><span>'+(S.idx+1)+' / '+total+'</span></div>'+
     '<div class="progress"><i style="width:'+pct+'%"></i></div>'+
     '<div class="cardwrap"><div class="flipcard'+(S.revealed?' rev':'')+'" data-act="flip">'+front+back+'</div></div>'+
     '<div class="btnrow">'+
@@ -631,9 +683,10 @@ function roundEndHtml(){
   const log = S.roundLog[S.roundLog.length-1] || {round:S.round,total:S.queue.length,wrong:S.roundWrong.length};
   const okN = log.total - log.wrong;
   const nWrong = S.roundWrong.length;
+  const retryN = S.retry.length;
   const another = canContinue();
   const must = mustContinue();
-  const nextN = another ? (S.round+1<=S.baseRounds ? S.cards.length : nWrong) : 0;
+  const nextN = another ? (S.round+1<=S.baseRounds ? S.cards.length : retryN) : 0;
   const passed = !must;
   return '<div class="panel">'+
     '<h2>'+roundLabel(log.round)+'结果</h2>'+
@@ -647,7 +700,7 @@ function roundEndHtml(){
         (must
           ? '基本轮数共 '+S.baseRounds+' 轮，当前是第 '+log.round+' 轮，继续考第 '+(log.round+1)+' 轮（全部卡片重考）。'
           : (another
-              ? '已考满基本轮数（'+S.baseRounds+' 轮），但本轮仍有 '+nWrong+' 个错题，自动追加第 '+(log.round+1)+' 轮补考。'
+              ? '已考满基本轮数（'+S.baseRounds+' 轮），本次仍有 '+retryN+' 个待补考错题，自动追加第 '+(log.round+1)+' 轮补考。'
               : (nWrong ? '已达到最大轮数（'+MAX_ROUNDS+' 轮），剩余错题将在明天重新复习。' : '基本轮数与错题补考已全部通过。')))+
       '</div>'+
       '<div class="btnrow">'+
@@ -662,8 +715,9 @@ function doneHtml(){
   const tot = S.totalOk + S.totalNo;
   const acc = tot ? Math.round(S.totalOk/tot*100) : 0;
   const nxt = S.cards.map(id=>DB.rec[id]).filter(Boolean).sort((a,b)=>a.next-b.next)[0];
+  const challenge = S.mode==='challenge';
   return '<div class="panel">'+
-    '<h2>本次完成</h2>'+
+    '<h2>'+(challenge?'总复习大闯关完成':'本次完成')+'</h2>'+
     '<div class="summary">'+
       '<div><span class="big">'+acc+'%</span> <span class="hint">总正确率（'+S.totalOk+'/'+tot+' 题，共 '+S.round+' 轮测试）</span></div>'+
       '<div class="stats">'+
@@ -674,7 +728,7 @@ function doneHtml(){
       '</div>'+
       '<div class="note">本次共完成 '+S.round+' 轮测试（基本 '+S.baseRounds+' 轮'+(S.round>S.baseRounds?'，含 '+ (S.round-S.baseRounds) +' 轮错题补考':'')+'）。全部答对的卡片已按艾宾浩斯间隔（1/2/4/7/15/30 天）排入复习计划；答错过的卡片明天需要重新复习。</div>'+
       '<div class="btnrow">'+
-        '<button class="btn" data-act="again">再学一批新词根</button>'+
+        (challenge?'<button class="btn" data-act="challenge-again">再闯一次</button>':'<button class="btn" data-act="again">再学一批新词根</button>')+
         '<button class="btn ghost" data-nav="plan">查看复习计划</button>'+
         '<button class="btn ghost" data-nav="home">返回首页</button>'+
       '</div>'+
@@ -703,12 +757,14 @@ function planHtml(){
         (o.list.slice(0,8).map(r=>esc(label(r))).join('、')||'—')+(o.list.length>8?' 等 '+o.list.length+' 个':'')+'</td></tr>').join('')+
       '</tbody></table>' : '<div class="note">还没有学习记录。先回首页开始今日学习。</div>')+
     (overdue.length ? '<div class="flash" style="margin-top:12px">另有 '+overdue.length+' 个卡片已过期未复习（今天之前到期）。</div>' : '')+
+    (all.length ? '<div class="btnrow" style="margin-top:12px"><button class="btn ghost sm" data-act="shift-2">全部复习计划顺延 2 天</button></div>' : '')+
   '</div>'+
   '<div class="panel">'+
     '<h2>间隔说明</h2>'+
     '<ul class="plain">'+
       '<li>掌握等级 1→6 对应复习间隔：'+INTERVALS.join(' / ')+' 天。</li>'+
       '<li>一次测试中全部答对 → 等级 +1，按新间隔排期；答错过 → 等级归零，明天重新复习。</li>'+
+      '<li>某天有到期卡片但未完成复习 → 全部计划顺延 1 天；连续漏复习则逐天顺延，不累积逾期。</li>'+
       '<li>等级 6 视为已掌握（30 天后仍会最后复查一次）。</li>'+
     '</ul>'+
     '<div style="height:10px"></div>'+
@@ -817,6 +873,7 @@ document.getElementById('app').addEventListener('click', e=>{
   else if(a==='finish'){ commit(); }
   else if(a==='quit'){ if(window.confirm('退出本次学习？已完成的测试进度不会保存。')){ S=null; view='home'; render(); } }
   else if(a==='again'){ nextBatch(); }
+  else if(a==='challenge-again'){ startChallenge(); }
   else if(a==='reshuffle'){
     reshuffleOrder(); msg='已按当前范围（'+DB.set.from+'–'+DB.set.to+'）重新乱序。'; render();
   }
@@ -830,12 +887,18 @@ document.getElementById('app').addEventListener('click', e=>{
       resetAll(); msg='已清空全部学习进度，并重新乱序。'; view='home'; S=null; render();
     }
   }
+  else if(a==='shift-2'){
+    if(window.confirm('确定将所有卡片的复习日期顺延 2 天吗？')){
+      shiftSchedule(2); msg='已将全部复习计划顺延 2 天。'; render();
+    }
+  }
   else if(a==='start-spelling'){ startSpelling(); }
   else if(a==='start-spelling-fill'){ startSpelling(true); }
   else if(a==='spell-submit'){ submitSpelling(); }
   else if(a==='spell-next'){ nextSpelling(); }
   else if(a==='spell-again'){ startSpelling(S.spellFill); }
   else if(a==='start-review'){ startSession(dueList().map(r=>r.id),'review'); }
+  else if(a==='start-challenge'){ startChallenge(); }
   else if(a==='start-new'){ startSession(pickNew(DB.set.daily).map(r=>r.id),'new'); }
 });
 
@@ -860,6 +923,8 @@ document.addEventListener('keydown', e=>{
   }
 });
 
+const shiftedDays = rolloverSchedule();
+if(shiftedDays) msg = '检测到 '+shiftedDays+' 天有复习计划但未完成，已将全部复习计划顺延 '+shiftedDays+' 天。';
 render();
 </script>
 </body>

@@ -84,7 +84,7 @@ function loadApp(seedStore, opts = {}) {
     get DB(){ return DB; },
     get S(){ return S; },
     scopeRoots, orderIds, pickNew, ensureOrder, resetRange, resetAll, unlearned, canContinue, mustContinue,
-    startSession, newRoundCount, save
+    startSession, newRoundCount, save, today, addDays, rolloverSchedule, shiftSchedule
   };`, ctx);
   const T = sandbox.__T;
 
@@ -196,12 +196,49 @@ console.log('\n[2] 测试轮数：基本 3 轮 + 错题追加补考（上限 8�
   ok(sizes.every(s => s.n === 10 && s.type === 'all'), '第 1/2/3 轮都覆盖全部卡片（10 张）', JSON.stringify(sizes.map(s => s.n)));
   ok(!a.T.canContinue(), '第 3 轮全对后没有下一轮');
 
-  // 前两轮错、第 3 轮全对 → 正好 3 轮结束（第 3 轮全考，错题已被覆盖）
+  // 前两轮错、第 3 轮全对 → 早期错题仍须追加补考
   const b = loadApp({});
   studyAll(b);
   const s2 = driveRounds(b, { wrong: [1, 2] });
-  ok(s2.length === 3, '第 1、2 轮有错题但第 3 轮全对 → 3 轮结束', JSON.stringify(s2.map(s => s.round + ':' + s.n)));
-  ok(s2.every(s => s.n === 10), '第 1~3 轮均覆盖全部卡片', JSON.stringify(s2.map(s => s.n)));
+  ok(s2.length === 4, '第 1、2 轮有错题但第 3 轮全对 → 仍追加第 4 轮补考', JSON.stringify(s2.map(s => s.round + ':' + s.n)));
+  ok(s2.slice(0, 3).every(s => s.n === 10), '第 1~3 轮均覆盖全部卡片', JSON.stringify(s2.map(s => s.n)));
+  ok(s2[3].type === 'makeup' && s2[3].n >= 2 && s2[3].n <= 4, '第 4 轮覆盖前两轮留下的全部待补考错题', JSON.stringify(s2[3]));
+
+  // 复习第 1 轮答错的卡片，第 2、3 轮答对也不能提前移出待补考列表
+  const review = loadApp({});
+  review.T.startSession(review.T.scopeRoots().slice(0, 3).map(r => r.id), 'review');
+  while(S(review).phase === 'study'){
+    if(S(review).idx === S(review).cards.length - 1) review.click({ act: 'begin-test' });
+    else review.click({ act: 'next' });
+  }
+  let earlyWrong = null;
+  const laterRounds = new Set();
+  for(let round = 1; round <= 3; round++){
+    while(S(review).phase === 'quiz'){
+      const q = S(review).q, ci = q.opts.indexOf(q.ans);
+      const makeWrong = round === 1 && earlyWrong === null;
+      if(makeWrong) earlyWrong = q.id;
+      if(round > 1 && q.id === earlyWrong) laterRounds.add(round);
+      review.click({ ans: makeWrong ? (ci === 0 ? 1 : 0) : ci });
+      review.click({ act: 'after' });
+    }
+    if(round < 3) review.click({ act: 'next-round' });
+  }
+  ok(earlyWrong !== null && laterRounds.size === 2, '回归场景确实包含第 1 轮答错、第 2/3 轮答对');
+  ok(S(review).retry.length === 1 && S(review).retry[0] === earlyWrong,
+    '后续基础轮答对不会清除第 1 轮留下的待补考错题', JSON.stringify(S(review).retry));
+  ok(S(review).roundWrong.length === 0 && review.T.canContinue(),
+    '复习第 3 轮全对后仍因早期错题进入补考');
+  ok(review.appEl.innerHTML.includes('本次仍有 1 个待补考错题') && review.appEl.innerHTML.includes('补考（1 题）'),
+    '轮次结果页显示全部待补考错题数量');
+  review.click({ act: 'next-round' });
+  ok(S(review).round === 4 && S(review).queue.length === 1 && S(review).q.id === earlyWrong,
+    '复习第 4 轮只重练早期答错的卡片', JSON.stringify(S(review).queue));
+  const reviewAnswer = S(review).q.opts.indexOf(S(review).q.ans);
+  review.click({ ans: reviewAnswer });
+  review.click({ act: 'after' });
+  ok(S(review).retry.length === 0 && !review.T.canContinue(),
+    '补考答对后移出待补考列表且不再追加轮次');
 
   // 第 3 轮仍有错题 → 追加第 4 轮，且第 4 轮只考第 3 轮错题
   const c = loadApp({});
@@ -291,9 +328,9 @@ console.log('\n[3] 进度重置');
 {
   const a = loadApp({});
   studyAll(a);
-  // 第 1 轮故意答错 1 题，第 2、3 轮全对，然后结束会话
+  // 第 1 轮故意答错 1 题，第 2、3 轮全对，第 4 轮补考通过后结束会话
   let wrongId = null;
-  for (const rnd of [1, 2, 3]) {
+  for (const rnd of [1, 2, 3, 4]) {
     while (S(a).phase === 'quiz') {
       const q = S(a).q, ci = q.opts.indexOf(q.ans);
       const makeWrong = (rnd === 1 && wrongId === null);
@@ -336,7 +373,7 @@ console.log('\n[4] 既有功能回归');
   const a = loadApp({});
   const h = a.appEl.innerHTML;
   ok(h.includes('背诵范围与每日数量') && h.includes('每日背诵个数'), '首页范围/每日数量选择器仍在');
-  ok(h.includes('A–R · 342 词根 · 819 单词'), '标题统计正确');
+  ok(h.includes('A–R · 342 词根 · 814 单词'), '标题统计正确');
   ok(a.query().some(e => e.dataset.daily === '10'), '每日数量快捷按钮仍在');
   ok(h.includes('id="new-rounds"') && h.includes('新学按首页设置考 3 轮'), '首页提供新学轮数选择并默认显示 3 轮');
   ok(h.includes('共 8 种') && h.includes('跨轮次不重复'), '首页说明 8 种题型与跨轮次题目去重');
@@ -398,7 +435,7 @@ console.log('\n[6] 边界与异常');
   // 范围倒置：起始字母 > 结束字母 → 按字母序自动纠正
   const c = loadApp({});
   DB(c).set.from = 'C'; DB(c).set.to = 'A';
-  ok(c.T.scopeRoots().length === 81, '起始>结束仍按字母序取范围（A–C 共 81 词根）', c.T.scopeRoots().length);
+  ok(c.T.scopeRoots().length === 80, '起始>结束仍按字母序取范围（A–C 共 80 词根）', c.T.scopeRoots().length);
 
   // 每日数量越界 → 钳制到 1..999
   const d = loadApp({});
@@ -492,6 +529,193 @@ console.log('\n[7] 三模块入口与单词拼写');
     '补入未学模式保留全部已学单词并补足设定题数');
   ok(S(c).spellQueue.some(item => !DB(c).rec[item.r.id]) && S(c).spellFill, '补入未学模式确实包含未学词根单词');
   ok(JSON.stringify(DB(c).rec) === fillBeforeRec, '补入未学单词不会把未学词根标记为已学');
+}
+
+/* ================= 7.5 总复习大闯关 ================= */
+console.log('\n[7.5] 总复习大闯关');
+{
+  const a = loadApp({});
+  const locked = a.appEl.innerHTML.match(/<button[^>]*data-act="start-challenge"[^>]*>/);
+  ok(locked && locked[0].includes('disabled'), '当前范围未全部学完时闯关入口锁定');
+  a.click({ act: 'start-challenge' });
+  ok(S(a) === null && a.appEl.innerHTML.includes('请先完成当前范围的全部新学'),
+    '未解锁时即使触发入口也不会创建学习记录或开始闯关');
+
+  DB(a).set.from = 'A'; DB(a).set.to = 'A'; DB(a).set.newRounds = 8;
+  a.click({ nav: 'home' });
+  const roots = a.T.scopeRoots(), ids = new Set(roots.map(r=>r.id)), t = a.T.today();
+  roots.forEach(r=>{
+    DB(a).rec[r.id] = {level:1, first:a.T.addDays(t,-10), last:a.T.addDays(t,-1), next:a.T.addDays(t,15), ok:1, no:0};
+  });
+  const beforeCount = Object.keys(DB(a).rec).length;
+  a.click({ nav: 'home' });
+  const unlocked = a.appEl.innerHTML.match(/<button[^>]*data-act="start-challenge"[^>]*>/);
+  ok(unlocked && !unlocked[0].includes('disabled') && a.appEl.innerHTML.includes('已解锁'),
+    '当前范围全部学完后闯关入口解锁');
+  ok(a.appEl.innerHTML.includes('开始复习（0 张卡片）') && a.appEl.innerHTML.includes('不受到期日限制'),
+    '全部卡片均未到期时仍可明确进入总复习');
+
+  a.click({ act: 'start-challenge' });
+  ok(S(a).mode === 'challenge' && S(a).phase === 'study' && S(a).cards.length === roots.length,
+    '闯关按普通复习的翻卡阶段开始并覆盖整个范围');
+  ok(S(a).cards.every(id=>ids.has(id) && DB(a).rec[id]) && Object.keys(DB(a).rec).length === beforeCount,
+    '闯关不混入范围外或未学词根，也不创建额外学习记录');
+  ok(S(a).baseRounds === 3, '闯关固定三轮，不受新学轮数设置影响');
+  ok(a.appEl.innerHTML.includes('总复习大闯关 · 翻面复习'), '翻卡阶段显示闯关标题');
+
+  let guard = 0;
+  while(S(a).phase === 'study' && guard++ < 500){
+    if(S(a).idx === S(a).cards.length-1) a.click({ act: 'begin-test' });
+    else a.click({ act: 'next' });
+  }
+  const rounds = driveRounds(a);
+  ok(rounds.length === 3 && rounds.every(r=>r.type === 'all' && r.n === roots.length),
+    '闯关前三轮均覆盖范围内全部卡片', JSON.stringify(rounds));
+  a.click({ act: 'finish' });
+  ok(S(a).phase === 'done' && a.appEl.innerHTML.includes('总复习大闯关完成') && a.appEl.innerHTML.includes('再闯一次'),
+    '闯关完成页显示专属结果与再次挑战入口');
+  ok(roots.every(r=>DB(a).rec[r.id].level === 2 && DB(a).rec[r.id].last === t && DB(a).rec[r.id].next === a.T.addDays(t,2)),
+    '闯关全对后按普通复习规则提升等级并更新复习计划');
+  a.click({ act: 'challenge-again' });
+  ok(S(a).mode === 'challenge' && S(a).phase === 'study' && S(a).cards.length === roots.length,
+    '再闯一次重新覆盖当前范围全部词根');
+}
+
+/* ================= 8. 词库完整性与旧进度迁移 ================= */
+console.log('\n[8] 词库完整性与旧进度迁移');
+{
+  const a = loadApp({});
+  const roots = a.T.scopeRoots();
+  const wordCount = roots.reduce((n, r) => n + r.words.length, 0);
+  const ids = roots.map(r => r.id);
+  const letterNums = roots.map(r => r.letter + ':' + r.num);
+  const wordsOf = r => r.words.map(w => w.w);
+
+  ok(roots.length === 342 && wordCount === 814, '词库规模为 342 词根组 / 814 单词', roots.length + '/' + wordCount);
+  ok(new Set(ids).size === ids.length, '词根 id 全部唯一');
+  ok(new Set(letterNums).size === letterNums.length, '字母段内编号全部唯一');
+  ok(roots.every(r => r.forms.length > 0 && r.words.length > 0), '每个词根都有词形和至少一个例词');
+
+  const aug = roots.find(r => r.id === 26);
+  ok(aug.forms.includes('aug') && ['augment', 'augmentation'].every(w => wordsOf(aug).includes(w)) &&
+    !roots.some(r => r.id === 27 || r.forms.includes('sep')), 'augment 与 augmentation 同归 aug，错误 sep 卡片已删除');
+
+  const glaci = roots.find(r => r.id === 146);
+  const gress = roots.find(r => r.id === 154);
+  ok(!wordsOf(glaci).includes('progress') && wordsOf(gress).includes('progress'), 'progress 已从 glaci 移至 gress');
+
+  const forms = roots.flatMap(r => r.forms);
+  ok(['crux', 'fabul', 'genit'].every(f => forms.includes(f)) &&
+    ['curx', 'fabal', 'genif'].every(f => !forms.includes(f)), 'curx/fabal/genif 三个词根拼写已纠正');
+
+  const removed = ['encumber', 'facetious', 'preface', 'nostrum', 'outrage'];
+  ok(roots.every(r => wordsOf(r).every(w => !removed.includes(w))), '五个无合适现有词根卡片的错配例词已移除');
+
+  const neg = roots.find(r => r.id === 251);
+  const lect = roots.find(r => r.id === 193);
+  ok(!wordsOf(neg).includes('neglect') && wordsOf(lect).includes('neglect'), 'neglect 已从 neg=deny 移至 lect/lig=choose/gather');
+
+  const parEqual = roots.find(r => r.id === 278);
+  const parere = roots.find(r => r.id === 343);
+  ok(['parent', 'multiparous'].every(w => !wordsOf(parEqual).includes(w) && wordsOf(parere).includes(w)) &&
+    parere.meaningEn === 'to give birth', 'parent/multiparous 已从 par=equal 拆至 parere=give birth');
+
+  const trailing = [];
+  roots.forEach(r => r.words.forEach(w => w.senses.forEach(s => {
+    if(/[，,;；：:、]$/.test(s.cn)) trailing.push(r.id + ':' + w.w);
+  })));
+  ok(trailing.length === 0, '中文释义没有多余末尾标点', trailing.join(','));
+
+  const legacyStore = {
+    'rootLearner.v1': JSON.stringify({
+      rec: {27: {level: 2, next: 123, ok: 4, no: 1}},
+      set: {from: 'A', to: 'R', daily: 20, newRounds: 3},
+      orderKey: 'A~R', orderPool: [27]
+    })
+  };
+  const legacy = loadApp(legacyStore);
+  ok(DB(legacy).rec[26] && DB(legacy).rec[26].level === 2 && !DB(legacy).rec[27], '只有旧 rec27 时迁移为 aug 的 rec26');
+  const persisted = JSON.parse(legacyStore['rootLearner.v1']);
+  ok(persisted.rec[26] && persisted.rec[26].level === 2 && !persisted.rec[27], '迁移后的学习记录立即持久化');
+  ok(DB(legacy).orderPool.length === roots.length && !DB(legacy).orderPool.includes(27), '旧乱序队列中的无效 id27 被重新生成');
+
+  const both = loadApp({
+    'rootLearner.v1': JSON.stringify({
+      rec: {26: {level: 4}, 27: {level: 1}},
+      set: {from: 'A', to: 'R', daily: 20, newRounds: 3},
+      orderKey: null, orderPool: []
+    })
+  });
+  ok(DB(both).rec[26].level === 4 && !DB(both).rec[27], 'rec26/rec27 同时存在时保留 aug 原进度并移除旧记录');
+}
+
+/* ================= 9. 漏复习自动顺延 ================= */
+console.log('\n[9] 漏复习自动顺延');
+{
+  const day = offset => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + offset);
+    return d.getTime();
+  };
+  const record = (last, next) => ({level:1, first:day(-10), last, next, ok:1, no:0});
+  const seed = (rec, checked, withChecked = true) => {
+    const db = {
+      rec, set:{from:'A', to:'R', daily:20, newRounds:3},
+      orderKey:null, orderPool:[]
+    };
+    if(withChecked) db.scheduleChecked = checked;
+    return {'rootLearner.v1':JSON.stringify(db)};
+  };
+
+  const todayApp = loadApp(seed({1:record(day(-1), day(0))}, day(-1)));
+  ok(DB(todayApp).rec[1].next === day(0), '今天到期的卡片不会提前判为漏复习');
+
+  const oneStore = seed({
+    1:record(day(-2), day(-1)),
+    2:record(day(-2), day(2))
+  }, day(-2));
+  const one = loadApp(oneStore);
+  ok(DB(one).rec[1].next === day(0) && DB(one).rec[2].next === day(3),
+    '漏复习 1 天后，到期与未来的全部计划都顺延 1 天');
+  ok(one.appEl.innerHTML.includes('检测到 1 天有复习计划但未完成'), '首页提示本次自动顺延天数');
+
+  const twoStore = seed({
+    1:record(day(-3), day(-2)),
+    2:record(day(-3), day(2))
+  }, day(-3));
+  const two = loadApp(twoStore);
+  ok(DB(two).rec[1].next === day(0) && DB(two).rec[2].next === day(4),
+    '连续漏复习 2 天后，全部计划顺延 2 天并保持间隔');
+  const beforeReload = Object.values(DB(two).rec).map(r => r.next);
+  const reopened = loadApp(twoStore);
+  ok(Object.values(DB(reopened).rec).every((r, i) => r.next === beforeReload[i]),
+    '同一天重复打开不会重复顺延');
+
+  const noPlan = loadApp(seed({1:record(day(-3), day(2))}, day(-3)));
+  ok(DB(noPlan).rec[1].next === day(2) && DB(noPlan).scheduleChecked === day(-1),
+    '没有到期计划的过去日期不造成顺延，但仍记录已检查日期');
+
+  const legacy = loadApp(seed({1:record(day(-3), day(-2))}, 0, false));
+  ok(DB(legacy).rec[1].next === day(0) && DB(legacy).scheduleChecked === day(-1),
+    '旧数据按最后完成学习日期补齐漏复习顺延');
+
+  const uncommitted = loadApp(seed({1:record(0, day(-40))}, 0, false));
+  ok(DB(uncommitted).rec[1].next === day(-40),
+    '从未完成测试的旧卡片不猜测漏复习天数');
+
+  const manualStore = seed({
+    1:record(day(-1), day(0)),
+    2:record(day(-1), day(4))
+  }, day(-1));
+  const manual = loadApp(manualStore);
+  manual.click({nav:'plan'});
+  ok(manual.appEl.innerHTML.includes('data-act="shift-2"'), '复习计划页提供手动顺延 2 天入口');
+  manual.click({act:'shift-2'});
+  const persisted = JSON.parse(manualStore['rootLearner.v1']);
+  ok(DB(manual).rec[1].next === day(2) && DB(manual).rec[2].next === day(6) &&
+    persisted.rec[1].next === day(2) && persisted.rec[2].next === day(6),
+    '手动顺延 2 天覆盖全部卡片并立即持久化');
 }
 
 console.log('\n===== 结果：' + pass + ' passed, ' + fail + ' failed =====');
